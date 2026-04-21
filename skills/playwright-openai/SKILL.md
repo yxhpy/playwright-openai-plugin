@@ -15,6 +15,7 @@ Use this skill for the `playwright-openai-plugin` Codex plugin and its local `po
 - For long-running image/chat work, keep submit, wait, collect, inspect, and revise as separate recoverable steps.
 - Do not resubmit a job just because `wait` timed out. Inspect or retry wait first.
 - Do not use destructive browser actions to undo/delete prior ChatGPT turns unless a future explicit workflow is designed.
+- For action packs, do not persist prompt text, character descriptions, source URLs, cookies, local storage, or full conversation URLs in manifests or logs.
 
 ## Entrypoints
 
@@ -71,6 +72,26 @@ Continue the same open image conversation:
 ```bash
 scripts/poai image revise --job-id <job-id> --prompt "<new prompt>" --json
 ```
+
+Create an action pack from live generation:
+
+```bash
+scripts/poai action-pack create --character "<character description>" --actions idle,walk,run,jump,attack,cast,hurt,victory --model thinking --json
+```
+
+Package existing action sheets without browser mutation:
+
+```bash
+scripts/poai action-pack create --from-dir /path/to/raw-sheets --actions idle,walk --output-dir /path/to/output --json
+```
+
+Expected action-pack outputs:
+
+- `package/<action>/<action>_01.png` frame folders.
+- `package/action_pack_atlas.png`.
+- `package/action_pack_animation.gif`.
+- `package/manifest.json`.
+- `action_pack.zip`.
 
 ## Model Guidance
 

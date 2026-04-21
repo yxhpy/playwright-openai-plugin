@@ -21,6 +21,7 @@ import {
   runImageSubmit,
   runImageWait,
 } from './images.js';
+import { runActionPackCreate } from './action-pack.js';
 import { writeJson, writeText } from './output.js';
 
 const HELP = `playwright-openai
@@ -42,6 +43,7 @@ Usage:
   poai image collect --job-id <id> [--output-dir <path>] [--max-artifacts <n>] [--json] [--text]
   poai image jobs list [--json] [--text] [--status <status>] [--limit <n>]
   poai image jobs cleanup [--json] [--text] [--status <status>] [--limit <n>] [--yes]
+  poai action-pack create [--character <text> | --from-dir <path>] [--actions <list>] [--file <path>] [--model <auto|instant|thinking|pro|label>] [--output-dir <path>] [--name <name>] [--grid <CxR>] [--frames-per-action <n>] [--frame-size <WxH>] [--background <auto|none|#rrggbb>] [--tolerance <n>] [--delay-ms <ms>] [--json] [--text] [--timeout-ms <ms>]
   poai browser launch [--json] [--text] [--port <n>] [--profile-dir <path>] [--chrome-path <path>] [--url <url>] [--headless]
   poai browser stop [--json] [--text]
 
@@ -65,6 +67,7 @@ Commands:
   image collect           Download generated image artifacts for a job.
   image jobs list         List non-secret local image job metadata.
   image jobs cleanup      Preview or delete selected local image job metadata.
+  action-pack create      Generate or package action sprite sheets into frames, atlas, GIF, manifest, and zip.
   browser launch          Start a managed Chrome profile with a standard CDP endpoint.
   browser stop            Stop the managed Chrome process launched by this CLI.
 `;
@@ -72,7 +75,7 @@ Commands:
 function parseArgs(argv) {
   const args = [...argv];
   const command = args[0] && !args[0].startsWith('-') ? args.shift() : 'status';
-  const subcommand = (command === 'browser' || command === 'chat' || command === 'image') && args[0] && !args[0].startsWith('-') ? args.shift() : undefined;
+  const subcommand = (command === 'browser' || command === 'chat' || command === 'image' || command === 'action-pack') && args[0] && !args[0].startsWith('-') ? args.shift() : undefined;
   const action = (command === 'chat' || command === 'image') && subcommand === 'jobs' && args[0] && !args[0].startsWith('-') ? args.shift() : undefined;
   const options = {
     format: 'json',
@@ -90,6 +93,16 @@ function parseArgs(argv) {
     jobStatus: undefined,
     limit: undefined,
     maxArtifacts: undefined,
+    actions: undefined,
+    character: undefined,
+    fromDir: undefined,
+    name: undefined,
+    grid: undefined,
+    framesPerAction: undefined,
+    frameSize: undefined,
+    background: undefined,
+    backgroundTolerance: undefined,
+    delayMs: undefined,
     yes: false,
     headless: false,
     timeoutMs: undefined,
@@ -136,6 +149,48 @@ function parseArgs(argv) {
       i += 1;
     } else if (arg === '--output-dir') {
       options.outputDir = readValue(args, i, arg);
+      i += 1;
+    } else if (arg === '--actions') {
+      options.actions = readValue(args, i, arg);
+      i += 1;
+    } else if (arg === '--character') {
+      options.character = readValue(args, i, arg);
+      i += 1;
+    } else if (arg === '--from-dir') {
+      options.fromDir = readValue(args, i, arg);
+      i += 1;
+    } else if (arg === '--name') {
+      options.name = readValue(args, i, arg);
+      i += 1;
+    } else if (arg === '--grid') {
+      options.grid = readValue(args, i, arg);
+      i += 1;
+    } else if (arg === '--frames-per-action') {
+      const value = Number(readValue(args, i, arg));
+      if (!Number.isInteger(value) || value <= 0) {
+        throw new Error(`Invalid --frames-per-action value: ${args[i + 1]}`);
+      }
+      options.framesPerAction = value;
+      i += 1;
+    } else if (arg === '--frame-size') {
+      options.frameSize = readValue(args, i, arg);
+      i += 1;
+    } else if (arg === '--background') {
+      options.background = readValue(args, i, arg);
+      i += 1;
+    } else if (arg === '--tolerance') {
+      const value = Number(readValue(args, i, arg));
+      if (!Number.isFinite(value) || value < 0 || value > 255) {
+        throw new Error(`Invalid --tolerance value: ${args[i + 1]}`);
+      }
+      options.backgroundTolerance = value;
+      i += 1;
+    } else if (arg === '--delay-ms') {
+      const value = Number(readValue(args, i, arg));
+      if (!Number.isInteger(value) || value <= 0) {
+        throw new Error(`Invalid --delay-ms value: ${args[i + 1]}`);
+      }
+      options.delayMs = value;
       i += 1;
     } else if (arg === '--job-id') {
       options.jobId = readValue(args, i, arg);
@@ -261,6 +316,12 @@ async function dispatch(command, subcommand, action, options) {
   }
   if (command === 'image') {
     throw new Error(`Unknown image subcommand: ${subcommand ?? '(missing)'}`);
+  }
+  if (command === 'action-pack' && subcommand === 'create') {
+    return runActionPackCreate(options);
+  }
+  if (command === 'action-pack') {
+    throw new Error(`Unknown action-pack subcommand: ${subcommand ?? '(missing)'}`);
   }
   if (command === 'browser' && subcommand === 'launch') {
     return runBrowserLaunch(options);

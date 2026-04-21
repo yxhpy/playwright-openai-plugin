@@ -23,6 +23,10 @@ export function defaultImageOutputDir(jobId) {
   return join(APP_DIR, 'outputs', 'images', jobId);
 }
 
+export function defaultActionPackOutputDir(name) {
+  return join(APP_DIR, 'outputs', 'action-packs', name);
+}
+
 export function defaultChromePath() {
   if (process.platform === 'darwin') {
     return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';

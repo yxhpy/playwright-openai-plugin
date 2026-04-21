@@ -1,7 +1,7 @@
 const CHAT_MODEL_BUTTON_SELECTORS = [
   'button[data-testid="model-switcher-dropdown-button"]',
-  'button[aria-label*="模型"]',
-  'button[aria-label*="Model" i]',
+  'button[aria-label="模型选择器"]',
+  'button[aria-label*="model selector" i]',
   'button[aria-haspopup="menu"]:has-text("ChatGPT")',
   'button[aria-haspopup="menu"]:has-text("Pro")',
 ];
@@ -62,17 +62,7 @@ export async function selectModelForAction(page, options = {}) {
     });
   }
 
-  let optionsList = [];
-  try {
-    await button.click({ timeout: 5000 });
-    optionsList = await waitForModelOptions(page, { capability });
-    if (optionsList.length === 0) {
-      await button.evaluate((element) => element.click()).catch(() => {});
-      optionsList = await waitForModelOptions(page, { capability });
-    }
-  } catch {
-    optionsList = [];
-  }
+  const optionsList = await openModelOptions(page, button, { capability });
 
   const choice = chooseModelOption(optionsList, { capability, requestedModel });
   if (choice) {
@@ -235,6 +225,26 @@ async function waitForModelOptions(page, options = {}) {
     await sleep(150);
   }
   return latest;
+}
+
+async function openModelOptions(page, button, options = {}) {
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    await page.keyboard.press('Escape').catch(() => {});
+    await page.waitForTimeout(150).catch(() => {});
+    if (attempt === 0) {
+      await button.click({ timeout: 5000 }).catch(() => {});
+    } else {
+      await button.evaluate((element) => element.click()).catch(() => {});
+    }
+    const optionsList = await waitForModelOptions(page, {
+      ...options,
+      timeoutMs: attempt === 0 ? 2500 : 4000,
+    });
+    if (optionsList.length > 0) {
+      return optionsList;
+    }
+  }
+  return [];
 }
 
 async function clickModelOption(page, choice) {

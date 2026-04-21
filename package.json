@@ -11,10 +11,13 @@
   "scripts": {
     "status": "node src/cli.js status",
     "test": "node --test",
-    "check": "node --check src/cli.js && node --check src/status.js && node --check src/cdp.js && node --check src/output.js && node --check src/browser.js && node --check src/paths.js && node --check src/discover.js && node --check src/model.js && node --check src/chat.js && node --check src/images.js && node --check src/jobs.js && npm test"
+    "check": "node --check src/cli.js && node --check src/status.js && node --check src/cdp.js && node --check src/output.js && node --check src/browser.js && node --check src/paths.js && node --check src/discover.js && node --check src/model.js && node --check src/chat.js && node --check src/images.js && node --check src/action-pack.js && node --check src/jobs.js && npm test"
   },
   "dependencies": {
-    "playwright": "^1.59.1"
+    "fflate": "^0.8.2",
+    "gifenc": "^1.0.3",
+    "playwright": "^1.59.1",
+    "pngjs": "^7.0.0"
   },
   "engines": {
     "node": ">=20"

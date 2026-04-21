@@ -50,12 +50,33 @@ scripts/poai image inspect --job-id <job-id> --json
 scripts/poai image revise --job-id <job-id> --prompt "Make it simpler" --json
 ```
 
+## Action Pack Workflow
+
+Generate or package animation action sheets into transparent frame PNGs, an atlas, GIF preview, manifest, and zip:
+
+```bash
+scripts/poai action-pack create \
+  --character "consistent game pet character" \
+  --actions idle,walk,run,jump,attack,cast,hurt,victory \
+  --output-dir ./outputs/my-action-pack
+```
+
+Package existing sheets without touching the browser:
+
+```bash
+scripts/poai action-pack create \
+  --from-dir ./outputs/raw-sheets \
+  --actions idle,walk \
+  --output-dir ./outputs/action-pack-smoke
+```
+
 ## Safety
 
 - This plugin does not include browser cookies, local storage, auth headers, job metadata, or generated outputs.
 - Managed browser profile and local jobs live outside this repo under `~/.playwright-openai/`.
 - ChatGPT conversation URLs are redacted in command output.
 - Image jobs are designed as submit/wait/collect/revise workflows to avoid duplicate submissions.
+- Action-pack manifests avoid prompt text, character descriptions, source URLs, and browser session material.
 
 ## Included Codex Skill
 
