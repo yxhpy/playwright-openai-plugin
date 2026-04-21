@@ -1,0 +1,42 @@
+{
+  "name": "playwright-openai-plugin",
+  "version": "0.1.0",
+  "description": "Installable Codex plugin and local CLI for operating an already logged-in OpenAI/ChatGPT browser session through Playwright.",
+  "author": {
+    "name": "Local Operator",
+    "email": "local@example.invalid",
+    "url": "https://chatgpt.com/"
+  },
+  "homepage": "https://chatgpt.com/",
+  "repository": "https://example.invalid/playwright-openai-plugin",
+  "license": "UNLICENSED",
+  "keywords": [
+    "openai",
+    "chatgpt",
+    "playwright",
+    "codex-plugin",
+    "browser-automation"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Playwright OpenAI",
+    "shortDescription": "Control a logged-in ChatGPT browser session from Codex.",
+    "longDescription": "Installable Codex plugin for the playwright-openai CLI. It helps Codex inspect, submit, wait, collect, revise, and diagnose ChatGPT web workflows through an already logged-in managed browser session without storing browser credentials.",
+    "developerName": "Local Operator",
+    "category": "Productivity",
+    "capabilities": [
+      "Interactive",
+      "Browser Automation",
+      "Local CLI"
+    ],
+    "websiteURL": "https://chatgpt.com/",
+    "privacyPolicyURL": "https://openai.com/policies/privacy-policy/",
+    "termsOfServiceURL": "https://openai.com/policies/terms-of-use/",
+    "defaultPrompt": [
+      "Inspect my current ChatGPT browser session.",
+      "Generate an image and collect the result.",
+      "Check whether an image job can wait, collect, or revise."
+    ],
+    "brandColor": "#10A37F"
+  }
+}

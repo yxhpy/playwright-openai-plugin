@@ -1,0 +1,22 @@
+{
+  "name": "playwright-openai-plugin",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Installable Codex plugin and local Playwright CLI for an already logged-in OpenAI browser session.",
+  "type": "module",
+  "bin": {
+    "playwright-openai": "./src/cli.js",
+    "poai": "./src/cli.js"
+  },
+  "scripts": {
+    "status": "node src/cli.js status",
+    "test": "node --test",
+    "check": "node --check src/cli.js && node --check src/status.js && node --check src/cdp.js && node --check src/output.js && node --check src/browser.js && node --check src/paths.js && node --check src/discover.js && node --check src/model.js && node --check src/chat.js && node --check src/images.js && node --check src/jobs.js && npm test"
+  },
+  "dependencies": {
+    "playwright": "^1.59.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
