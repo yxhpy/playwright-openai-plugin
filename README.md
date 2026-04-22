@@ -63,6 +63,8 @@ scripts/poai action-pack create \
 
 Strict QA runs by default and writes `package/qa_report.json`. If QA finds severe structural issues, the command returns `completed=false` and recommends regeneration or reprocessing. Use `--qa warn` only when you want to keep a suspect package for inspection.
 
+For browser-backed generation, add `--regen-failed --regen-attempts 1` to retry only actions that fail strict QA. This is intentionally opt-in because it consumes generation quota.
+
 Package existing sheets without touching the browser:
 
 ```bash
@@ -80,6 +82,7 @@ scripts/poai action-pack create \
 - Image jobs are designed as submit/wait/collect/revise workflows to avoid duplicate submissions.
 - Action-pack manifests avoid prompt text, character descriptions, source URLs, and browser session material.
 - Action-pack QA reports store structural frame metrics only.
+- Selective regeneration retries only QA-failed generated actions and is bounded by `--regen-attempts`.
 
 ## Included Codex Skill
 

@@ -49,6 +49,8 @@ export async function runActionPackCreate(options = {}) {
 
   let sheetPaths;
   let browserJobs = [];
+  let parentJobId = null;
+  const regeneratedActions = [];
   if (spec.fromDir) {
     sheetPaths = await resolveSheetPaths(spec.fromDir, spec.actions);
   } else {
@@ -58,9 +60,10 @@ export async function runActionPackCreate(options = {}) {
     }
     sheetPaths = generated.sheetPaths;
     browserJobs = generated.browserJobs;
+    parentJobId = generated.parentJobId;
   }
 
-  const packaged = await packageActionSheets({
+  let packaged = await packageActionSheets({
     actions: spec.actions,
     sheetPaths,
     outputDir,
@@ -73,6 +76,44 @@ export async function runActionPackCreate(options = {}) {
     qaMode: spec.qaMode,
     browserJobs,
   });
+
+  let failedActions = failedActionsFromQaReport(packaged.qaReport);
+  let regenAttemptsUsed = 0;
+  if (shouldRegenerateFailedActions(spec, packaged.qaReport)) {
+    for (let attempt = 1; attempt <= spec.regenAttempts && failedActions.length > 0; attempt += 1) {
+      const regenerated = await regenerateFailedActionSheets({
+        spec,
+        rawDir,
+        failedActions,
+        qaReport: packaged.qaReport,
+        sheetPaths,
+        browserJobs,
+        parentJobId,
+        options,
+        attempt,
+      });
+      if (!regenerated.ok) {
+        return regenerated;
+      }
+      parentJobId = regenerated.parentJobId;
+      regenAttemptsUsed = attempt;
+      regeneratedActions.push(...regenerated.regeneratedActions);
+      packaged = await packageActionSheets({
+        actions: spec.actions,
+        sheetPaths,
+        outputDir,
+        grid: spec.grid,
+        framesPerAction: spec.framesPerAction,
+        frameSize: spec.frameSize,
+        background: spec.background,
+        backgroundTolerance: spec.backgroundTolerance,
+        delayMs: spec.delayMs,
+        qaMode: spec.qaMode,
+        browserJobs,
+      });
+      failedActions = failedActionsFromQaReport(packaged.qaReport);
+    }
+  }
 
   const qaFailed = spec.qaMode === 'strict' && packaged.qaReport.status === 'fail';
 
@@ -97,10 +138,14 @@ export async function runActionPackCreate(options = {}) {
     qa_mode: spec.qaMode,
     qa_status: packaged.qaReport.status,
     qa_summary: packaged.qaReport.summary,
+    regen_failed: spec.regenFailed,
+    regen_attempts_used: regenAttemptsUsed,
+    regenerated_actions: regeneratedActions,
+    remaining_failed_actions: qaFailed ? failedActions : [],
     browser_jobs: browserJobs,
     diagnostics: qaFailed ? qaDiagnostics(packaged.qaReport) : [],
     next_step: qaFailed
-      ? 'Quality gate failed. Inspect qa_report.json, regenerate failed actions, or rerun with adjusted --background/--tolerance. Use --qa warn only when you intentionally want to keep a suspect package.'
+      ? chooseFailedQualityNextStep(spec, failedActions)
       : 'Action pack created. The manifest avoids prompt text, character descriptions, cookies, local storage, and source URLs.',
   };
 }
@@ -205,6 +250,7 @@ export async function packageActionSheets({
       job_id: job.job_id,
       parent_job_id: job.parent_job_id ?? null,
       model: job.model ?? null,
+      regeneration_attempt: Number.isInteger(job.regeneration_attempt) ? job.regeneration_attempt : null,
     })),
   };
   const manifestPath = join(packageDir, 'manifest.json');
@@ -279,9 +325,101 @@ function normalizeActionPackOptions(options = {}) {
     background: normalizeBackground(options.background),
     backgroundTolerance: normalizeTolerance(options.backgroundTolerance),
     qaMode: normalizeQaMode(options.qaMode),
+    regenFailed: Boolean(options.regenFailed),
+    regenAttempts: normalizeRegenAttempts(options.regenAttempts),
     delayMs: normalizeDelay(options.delayMs),
     filePath: options.filePath,
     timeoutMs: options.timeoutMs,
+  };
+}
+
+export function failedActionsFromQaReport(qaReport) {
+  const actions = new Set();
+  for (const issue of qaReport?.issues ?? []) {
+    if (issue.severity === 'error' && typeof issue.action === 'string' && issue.action) {
+      actions.add(issue.action);
+    }
+  }
+  return [...actions];
+}
+
+function shouldRegenerateFailedActions(spec, qaReport) {
+  return Boolean(
+    spec.regenFailed &&
+    !spec.fromDir &&
+    spec.qaMode !== 'off' &&
+    qaReport.status === 'fail' &&
+    spec.regenAttempts > 0,
+  );
+}
+
+async function regenerateFailedActionSheets({
+  spec,
+  rawDir,
+  failedActions,
+  qaReport,
+  sheetPaths,
+  browserJobs,
+  parentJobId,
+  options,
+  attempt,
+}) {
+  let currentParentJobId = parentJobId;
+  const regeneratedActions = [];
+  for (const action of failedActions) {
+    const prompt = buildActionPrompt(spec, action, {
+      regenerationAttempt: attempt,
+      issues: issuesForAction(qaReport, action),
+    });
+    const submitOptions = {
+      ...options,
+      prompt,
+      model: spec.model,
+      timeoutMs: spec.timeoutMs,
+    };
+    const submit = currentParentJobId
+      ? await runImageRevise({ ...submitOptions, jobId: currentParentJobId })
+      : await runImageSubmit({ ...submitOptions, filePath: spec.filePath });
+    if (!submit.submitted || !submit.job_id) {
+      return actionPackFailure('regenerate', submit.diagnostics ?? [], `Selective regeneration failed for action "${action}". ${submit.next_step ?? ''}`.trim());
+    }
+
+    const wait = await runImageWait({
+      ...options,
+      jobId: submit.job_id,
+      timeoutMs: spec.timeoutMs ?? 180000,
+    });
+    const actionRawDir = join(rawDir, action);
+    const collect = await runImageCollect({
+      ...options,
+      jobId: submit.job_id,
+      outputDir: actionRawDir,
+      maxArtifacts: 1,
+    });
+    if (!collect.completed || !collect.artifacts?.length) {
+      return actionPackFailure('regenerate_collect', [
+        ...(wait.diagnostics ?? []),
+        ...(collect.diagnostics ?? []),
+      ], `Could not collect regenerated sheet for action "${action}". Retry wait/collect for job ${submit.job_id} before another regeneration.`);
+    }
+
+    const artifactPath = collect.artifacts[0].path;
+    sheetPaths[action] = artifactPath;
+    browserJobs.push({
+      action,
+      job_id: submit.job_id,
+      parent_job_id: submit.parent_job_id ?? null,
+      model: submit.model ?? null,
+      regeneration_attempt: attempt,
+    });
+    regeneratedActions.push(action);
+    currentParentJobId = submit.job_id;
+  }
+
+  return {
+    ok: true,
+    parentJobId: currentParentJobId,
+    regeneratedActions,
   };
 }
 
@@ -560,6 +698,41 @@ function chooseQaRecommendation(errorCount, warningCount, issues) {
   return 'Package passed structural QA.';
 }
 
+function issuesForAction(qaReport, action) {
+  return (qaReport.issues ?? [])
+    .filter((issue) => issue.severity === 'error' && issue.action === action)
+    .slice(0, 8);
+}
+
+function summarizePromptIssues(issues) {
+  if (!issues.length) {
+    return '';
+  }
+  const grouped = new Map();
+  for (const issue of issues) {
+    const item = grouped.get(issue.code) ?? {
+      code: issue.code,
+      frames: [],
+      recommendation: issue.recommendation,
+    };
+    item.frames.push(issue.frame_number);
+    grouped.set(issue.code, item);
+  }
+  return [...grouped.values()]
+    .map((item) => `${item.code} on frame(s) ${item.frames.join(', ')}; ${item.recommendation}`)
+    .join(' ');
+}
+
+function chooseFailedQualityNextStep(spec, failedActions) {
+  if (spec.fromDir) {
+    return 'Quality gate failed for local sheets. Replace the failed raw sheet(s), or rerun with adjusted --background/--tolerance. Browser regeneration is only available without --from-dir.';
+  }
+  if (spec.regenFailed && spec.regenAttempts > 0) {
+    return `Quality gate still failed after ${spec.regenAttempts} regeneration attempt(s). Inspect qa_report.json and manually regenerate or repair: ${failedActions.join(', ')}.`;
+  }
+  return 'Quality gate failed. Rerun with --regen-failed to retry only failed generated actions, or inspect qa_report.json and repair manually.';
+}
+
 async function generateActionSheets(spec, rawDir, options) {
   if (!spec.character) {
     return actionPackFailure('generate', [], 'Missing --character for browser-backed action-pack generation. Use --from-dir to package existing sheets.');
@@ -612,17 +785,25 @@ async function generateActionSheets(spec, rawDir, options) {
     });
     parentJobId = submit.job_id;
   }
-  return { ok: true, sheetPaths, browserJobs };
+  return { ok: true, sheetPaths, browserJobs, parentJobId };
 }
 
-function buildActionPrompt(spec, action) {
-  return [
+function buildActionPrompt(spec, action, options = {}) {
+  const lines = [
     `Create one clean ${spec.grid.columns}x${spec.grid.rows} sprite sheet for the action "${action}".`,
     `Use exactly ${spec.framesPerAction} sequential animation frames in reading order.`,
     `Keep the same character across all frames: ${spec.character}.`,
     'Use a plain removable background, centered full-body pose, consistent scale, no labels, no captions, no UI, and no extra panels.',
     'Return one image sheet only.',
-  ].join(' ');
+  ];
+  if (options.regenerationAttempt) {
+    lines.splice(1, 0, `This is selective regeneration attempt ${options.regenerationAttempt} for a QA-failed action. Replace the previous bad sheet for "${action}".`);
+  }
+  const issueSummary = summarizePromptIssues(options.issues ?? []);
+  if (issueSummary) {
+    lines.splice(-1, 0, `Fix these QA problems: ${issueSummary}.`);
+  }
+  return lines.join(' ');
 }
 
 async function resolveSheetPaths(fromDir, actions) {
@@ -1014,6 +1195,17 @@ function normalizeQaMode(value) {
     return mode;
   }
   throw new Error('Invalid --qa value. Use strict, warn, or off.');
+}
+
+function normalizeRegenAttempts(value) {
+  if (value === undefined || value === null) {
+    return 1;
+  }
+  const attempts = Number(value);
+  if (!Number.isInteger(attempts) || attempts < 0 || attempts > 5) {
+    throw new Error('Invalid --regen-attempts value. Use an integer from 0 to 5.');
+  }
+  return attempts;
 }
 
 function normalizeTolerance(value) {

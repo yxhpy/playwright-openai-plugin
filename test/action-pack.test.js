@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PNG } from 'pngjs';
-import { packageActionSheets, runActionPackCreate } from '../src/action-pack.js';
+import { failedActionsFromQaReport, packageActionSheets, runActionPackCreate } from '../src/action-pack.js';
 
 test('packageActionSheets splits frames, removes simple background, and writes package files', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'poai-action-pack-'));
@@ -117,7 +117,44 @@ test('runActionPackCreate blocks blank sheets in strict QA mode', async () => {
   assert.equal(result.phase, 'quality_failed');
   assert.equal(result.completed, false);
   assert.equal(result.qa_status, 'fail');
+  assert.deepEqual(result.remaining_failed_actions, ['idle']);
   assert.ok(result.diagnostics.some((diagnostic) => diagnostic.category === 'qa_blank_frame'));
+});
+
+test('failedActionsFromQaReport returns unique error actions only', () => {
+  assert.deepEqual(failedActionsFromQaReport({
+    issues: [
+      { severity: 'warning', action: 'idle' },
+      { severity: 'error', action: 'walk' },
+      { severity: 'error', action: 'walk' },
+      { severity: 'error', action: 'run' },
+      { severity: 'error', action: '' },
+    ],
+  }), ['walk', 'run']);
+});
+
+test('regen-failed does not regenerate local from-dir sheets', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'poai-action-pack-local-regen-'));
+  const sourceDir = join(dir, 'source');
+  const outputDir = join(dir, 'out');
+  await writeBlankSheet(join(sourceDir, 'idle.png'));
+
+  const result = await runActionPackCreate({
+    fromDir: sourceDir,
+    outputDir,
+    actions: 'idle',
+    frameSize: '16x20',
+    grid: '3x3',
+    regenFailed: true,
+    regenAttempts: 2,
+  });
+
+  assert.equal(result.phase, 'quality_failed');
+  assert.equal(result.completed, false);
+  assert.equal(result.regen_failed, true);
+  assert.equal(result.regen_attempts_used, 0);
+  assert.deepEqual(result.regenerated_actions, []);
+  assert.match(result.next_step, /local sheets/);
 });
 
 test('runActionPackCreate can keep a suspect package in warn QA mode', async () => {

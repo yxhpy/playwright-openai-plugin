@@ -80,6 +80,12 @@ Create an action pack from live generation:
 scripts/poai action-pack create --character "<character description>" --actions idle,walk,run,jump,attack,cast,hurt,victory --model thinking --json
 ```
 
+Create an action pack and selectively retry QA-failed generated actions:
+
+```bash
+scripts/poai action-pack create --character "<character description>" --actions idle,walk,run,jump,attack,cast,hurt,victory --model thinking --regen-failed --regen-attempts 1 --json
+```
+
 Package existing action sheets without browser mutation:
 
 ```bash
@@ -99,6 +105,7 @@ Quality gate behavior:
 
 - Default `--qa strict` checks blank frames, subject bounds, center drift, scale drift, edge opacity, transparent margins, and crop safety.
 - If `qa_status` is `fail`, do not import the pack as production-ready.
+- Use `--regen-failed` only for browser-backed generation when the user accepts extra generation time/quota; it retries failed actions only.
 - Use `--qa warn` only to retain failed outputs for manual inspection or repair.
 
 ## Model Guidance

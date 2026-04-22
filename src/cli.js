@@ -43,7 +43,7 @@ Usage:
   poai image collect --job-id <id> [--output-dir <path>] [--max-artifacts <n>] [--json] [--text]
   poai image jobs list [--json] [--text] [--status <status>] [--limit <n>]
   poai image jobs cleanup [--json] [--text] [--status <status>] [--limit <n>] [--yes]
-  poai action-pack create [--character <text> | --from-dir <path>] [--actions <list>] [--file <path>] [--model <auto|instant|thinking|pro|label>] [--output-dir <path>] [--name <name>] [--grid <CxR>] [--frames-per-action <n>] [--frame-size <WxH>] [--background <auto|none|#rrggbb>] [--tolerance <n>] [--qa <strict|warn|off>] [--delay-ms <ms>] [--json] [--text] [--timeout-ms <ms>]
+  poai action-pack create [--character <text> | --from-dir <path>] [--actions <list>] [--file <path>] [--model <auto|instant|thinking|pro|label>] [--output-dir <path>] [--name <name>] [--grid <CxR>] [--frames-per-action <n>] [--frame-size <WxH>] [--background <auto|none|#rrggbb>] [--tolerance <n>] [--qa <strict|warn|off>] [--regen-failed] [--regen-attempts <n>] [--delay-ms <ms>] [--json] [--text] [--timeout-ms <ms>]
   poai browser launch [--json] [--text] [--port <n>] [--profile-dir <path>] [--chrome-path <path>] [--url <url>] [--headless]
   poai browser stop [--json] [--text]
 
@@ -103,6 +103,8 @@ function parseArgs(argv) {
     background: undefined,
     backgroundTolerance: undefined,
     qaMode: undefined,
+    regenFailed: false,
+    regenAttempts: undefined,
     delayMs: undefined,
     yes: false,
     headless: false,
@@ -188,6 +190,15 @@ function parseArgs(argv) {
       i += 1;
     } else if (arg === '--qa') {
       options.qaMode = readValue(args, i, arg);
+      i += 1;
+    } else if (arg === '--regen-failed') {
+      options.regenFailed = true;
+    } else if (arg === '--regen-attempts') {
+      const value = Number(readValue(args, i, arg));
+      if (!Number.isInteger(value) || value < 0 || value > 5) {
+        throw new Error(`Invalid --regen-attempts value: ${args[i + 1]}`);
+      }
+      options.regenAttempts = value;
       i += 1;
     } else if (arg === '--delay-ms') {
       const value = Number(readValue(args, i, arg));
