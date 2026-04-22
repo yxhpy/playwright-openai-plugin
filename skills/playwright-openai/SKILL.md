@@ -16,6 +16,7 @@ Use this skill for the `playwright-openai-plugin` Codex plugin and its local `po
 - Do not resubmit a job just because `wait` timed out. Inspect or retry wait first.
 - Do not use destructive browser actions to undo/delete prior ChatGPT turns unless a future explicit workflow is designed.
 - For action packs, do not persist prompt text, character descriptions, source URLs, cookies, local storage, or full conversation URLs in manifests or logs.
+- Treat action-pack QA failures as blockers in normal operation. Regenerate or reprocess failed actions unless the user explicitly asks to keep a suspect package with `--qa warn`.
 
 ## Entrypoints
 
@@ -90,8 +91,15 @@ Expected action-pack outputs:
 - `package/<action>/<action>_01.png` frame folders.
 - `package/action_pack_atlas.png`.
 - `package/action_pack_animation.gif`.
+- `package/qa_report.json`.
 - `package/manifest.json`.
 - `action_pack.zip`.
+
+Quality gate behavior:
+
+- Default `--qa strict` checks blank frames, subject bounds, center drift, scale drift, edge opacity, transparent margins, and crop safety.
+- If `qa_status` is `fail`, do not import the pack as production-ready.
+- Use `--qa warn` only to retain failed outputs for manual inspection or repair.
 
 ## Model Guidance
 

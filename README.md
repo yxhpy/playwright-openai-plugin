@@ -52,7 +52,7 @@ scripts/poai image revise --job-id <job-id> --prompt "Make it simpler" --json
 
 ## Action Pack Workflow
 
-Generate or package animation action sheets into transparent frame PNGs, an atlas, GIF preview, manifest, and zip:
+Generate or package animation action sheets into transparent frame PNGs, an atlas, GIF preview, QA report, manifest, and zip:
 
 ```bash
 scripts/poai action-pack create \
@@ -60,6 +60,8 @@ scripts/poai action-pack create \
   --actions idle,walk,run,jump,attack,cast,hurt,victory \
   --output-dir ./outputs/my-action-pack
 ```
+
+Strict QA runs by default and writes `package/qa_report.json`. If QA finds severe structural issues, the command returns `completed=false` and recommends regeneration or reprocessing. Use `--qa warn` only when you want to keep a suspect package for inspection.
 
 Package existing sheets without touching the browser:
 
@@ -77,6 +79,7 @@ scripts/poai action-pack create \
 - ChatGPT conversation URLs are redacted in command output.
 - Image jobs are designed as submit/wait/collect/revise workflows to avoid duplicate submissions.
 - Action-pack manifests avoid prompt text, character descriptions, source URLs, and browser session material.
+- Action-pack QA reports store structural frame metrics only.
 
 ## Included Codex Skill
 

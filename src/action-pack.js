@@ -24,6 +24,22 @@ const DEFAULT_GRID = { columns: 3, rows: 3 };
 const DEFAULT_FRAME_SIZE = { width: 160, height: 224 };
 const DEFAULT_DELAY_MS = 90;
 const DEFAULT_BACKGROUND_TOLERANCE = 42;
+const DEFAULT_QA_MODE = 'strict';
+const DEFAULT_FRAME_FIT_RATIO = 0.90;
+const QA_THRESHOLDS = {
+  alpha: 16,
+  minContentRatioError: 0.005,
+  smallSubjectHeightRatioError: 0.08,
+  smallSubjectHeightRatioWarn: 0.16,
+  edgeOpaqueRatioWarn: 0.05,
+  edgeOpaqueRatioError: 0.22,
+  opaqueRatioError: 0.80,
+  tightMarginWarnPx: 2,
+  centerDriftWarnRatio: 0.12,
+  centerDriftErrorRatio: 0.22,
+  scaleDriftWarnRatio: 0.30,
+  scaleDriftErrorRatio: 0.50,
+};
 
 export async function runActionPackCreate(options = {}) {
   const spec = normalizeActionPackOptions(options);
@@ -54,17 +70,22 @@ export async function runActionPackCreate(options = {}) {
     background: spec.background,
     backgroundTolerance: spec.backgroundTolerance,
     delayMs: spec.delayMs,
+    qaMode: spec.qaMode,
     browserJobs,
   });
+
+  const qaFailed = spec.qaMode === 'strict' && packaged.qaReport.status === 'fail';
 
   return {
     ok: true,
     command: 'action-pack create',
-    phase: spec.fromDir ? 'package_from_dir' : 'generate_and_package',
+    phase: qaFailed ? 'quality_failed' : (spec.fromDir ? 'package_from_dir' : 'generate_and_package'),
+    completed: !qaFailed,
     output_dir: outputDir,
     package_dir: packaged.packageDir,
     package_zip: packaged.packageZip,
     manifest: packaged.manifestPath,
+    qa_report: packaged.qaReportPath,
     atlas: packaged.atlasPath,
     animation_gif: packaged.animationGifPath,
     source: spec.fromDir ? 'from_dir' : 'browser',
@@ -73,9 +94,14 @@ export async function runActionPackCreate(options = {}) {
     grid: spec.grid,
     frames_per_action: spec.framesPerAction,
     frame_count: packaged.frameCount,
+    qa_mode: spec.qaMode,
+    qa_status: packaged.qaReport.status,
+    qa_summary: packaged.qaReport.summary,
     browser_jobs: browserJobs,
-    diagnostics: [],
-    next_step: 'Action pack created. The manifest avoids prompt text, character descriptions, cookies, local storage, and source URLs.',
+    diagnostics: qaFailed ? qaDiagnostics(packaged.qaReport) : [],
+    next_step: qaFailed
+      ? 'Quality gate failed. Inspect qa_report.json, regenerate failed actions, or rerun with adjusted --background/--tolerance. Use --qa warn only when you intentionally want to keep a suspect package.'
+      : 'Action pack created. The manifest avoids prompt text, character descriptions, cookies, local storage, and source URLs.',
   };
 }
 
@@ -89,12 +115,14 @@ export async function packageActionSheets({
   background = 'auto',
   backgroundTolerance = DEFAULT_BACKGROUND_TOLERANCE,
   delayMs = DEFAULT_DELAY_MS,
+  qaMode = DEFAULT_QA_MODE,
   browserJobs = [],
 } = {}) {
   const normalizedActions = normalizeActions(actions);
   const normalizedGrid = normalizeGrid(grid);
   const normalizedFrameSize = normalizeFrameSize(frameSize);
   const frameLimit = normalizeFramesPerAction(framesPerAction, normalizedGrid);
+  const normalizedQaMode = normalizeQaMode(qaMode);
   const packageDir = join(resolve(outputDir), 'package');
   const rawPackageDir = join(packageDir, 'raw');
   await mkdir(packageDir, { recursive: true });
@@ -142,6 +170,12 @@ export async function packageActionSheets({
   const animationGifPath = join(packageDir, 'action_pack_animation.gif');
   await writeFile(animationGifPath, buildGif(framesByAction, normalizedActions, delayMs));
 
+  const qaReport = buildQualityReport(framesByAction, normalizedActions, frameLimit, normalizedFrameSize, {
+    mode: normalizedQaMode,
+  });
+  const qaReportPath = join(packageDir, 'qa_report.json');
+  await writeFile(qaReportPath, `${JSON.stringify(qaReport, null, 2)}\n`, 'utf8');
+
   const manifest = {
     schema_version: 1,
     generated_at: new Date().toISOString(),
@@ -158,6 +192,13 @@ export async function packageActionSheets({
     files: {
       atlas: 'action_pack_atlas.png',
       animation_gif: 'action_pack_animation.gif',
+      qa_report: 'qa_report.json',
+    },
+    qa: {
+      mode: normalizedQaMode,
+      status: qaReport.status,
+      errors: qaReport.summary.errors,
+      warnings: qaReport.summary.warnings,
     },
     browser_jobs: browserJobs.map((job) => ({
       action: job.action,
@@ -178,6 +219,8 @@ export async function packageActionSheets({
     manifestPath,
     atlasPath,
     animationGifPath,
+    qaReportPath,
+    qaReport,
     frameCount: manifest.frame_count,
   };
 }
@@ -235,10 +278,286 @@ function normalizeActionPackOptions(options = {}) {
     model: options.model ?? 'thinking',
     background: normalizeBackground(options.background),
     backgroundTolerance: normalizeTolerance(options.backgroundTolerance),
+    qaMode: normalizeQaMode(options.qaMode),
     delayMs: normalizeDelay(options.delayMs),
     filePath: options.filePath,
     timeoutMs: options.timeoutMs,
   };
+}
+
+function buildQualityReport(framesByAction, actions, framesPerAction, frameSize, options = {}) {
+  const mode = normalizeQaMode(options.mode);
+  if (mode === 'off') {
+    return {
+      schema_version: 1,
+      generated_at: new Date().toISOString(),
+      mode,
+      status: 'skipped',
+      summary: {
+        actions: actions.length,
+        frames: actions.length * framesPerAction,
+        errors: 0,
+        warnings: 0,
+        recommendation: 'QA skipped by request.',
+      },
+      thresholds: QA_THRESHOLDS,
+      actions: [],
+      issues: [],
+    };
+  }
+
+  const actionReports = actions.map((action) => analyzeActionQuality(action, framesByAction.get(action) ?? [], frameSize));
+  const issues = actionReports.flatMap((report) => report.issues);
+  const errorCount = issues.filter((issue) => issue.severity === 'error').length;
+  const warningCount = issues.filter((issue) => issue.severity === 'warning').length;
+  return {
+    schema_version: 1,
+    generated_at: new Date().toISOString(),
+    mode,
+    status: errorCount > 0 ? 'fail' : (warningCount > 0 ? 'warn' : 'pass'),
+    summary: {
+      actions: actions.length,
+      frames: actions.length * framesPerAction,
+      errors: errorCount,
+      warnings: warningCount,
+      recommendation: chooseQaRecommendation(errorCount, warningCount, issues),
+    },
+    thresholds: QA_THRESHOLDS,
+    actions: actionReports,
+    issues,
+  };
+}
+
+function analyzeActionQuality(action, frames, frameSize) {
+  const frameReports = frames.map((frame, index) => analyzeFrameQuality(action, index, frame, frameSize));
+  const issues = frameReports.flatMap((frame) => frame.issues);
+  const nonBlankFrames = frameReports.filter((frame) => frame.metrics.content_ratio >= QA_THRESHOLDS.minContentRatioError && frame.metrics.bounds);
+
+  if (nonBlankFrames.length > 0) {
+    const medianCenterX = median(nonBlankFrames.map((frame) => frame.metrics.center.x));
+    const medianCenterY = median(nonBlankFrames.map((frame) => frame.metrics.center.y));
+    const medianWidth = median(nonBlankFrames.map((frame) => frame.metrics.bounds.width));
+    const medianHeight = median(nonBlankFrames.map((frame) => frame.metrics.bounds.height));
+
+    for (const frame of nonBlankFrames) {
+      const centerDrift = Math.max(
+        Math.abs(frame.metrics.center.x - medianCenterX) / frameSize.width,
+        Math.abs(frame.metrics.center.y - medianCenterY) / frameSize.height,
+      );
+      const scaleDrift = Math.max(
+        medianWidth > 0 ? Math.abs(frame.metrics.bounds.width - medianWidth) / medianWidth : 0,
+        medianHeight > 0 ? Math.abs(frame.metrics.bounds.height - medianHeight) / medianHeight : 0,
+      );
+      frame.metrics.center_drift_ratio = round(centerDrift);
+      frame.metrics.scale_drift_ratio = round(scaleDrift);
+      if (centerDrift >= QA_THRESHOLDS.centerDriftErrorRatio) {
+        issues.push(makeQaIssue('error', 'center_drift', action, frame.index, 'Subject center drifts too far from the action median.', {
+          center_drift_ratio: round(centerDrift),
+        }, 'Regenerate this action or manually realign the affected frame.'));
+      } else if (centerDrift >= QA_THRESHOLDS.centerDriftWarnRatio) {
+        issues.push(makeQaIssue('warning', 'center_drift', action, frame.index, 'Subject center drift is visible.', {
+          center_drift_ratio: round(centerDrift),
+        }, 'Inspect animation playback for unwanted jitter.'));
+      }
+
+      if (scaleDrift >= QA_THRESHOLDS.scaleDriftErrorRatio) {
+        issues.push(makeQaIssue('error', 'scale_drift', action, frame.index, 'Subject scale changes too much across frames.', {
+          scale_drift_ratio: round(scaleDrift),
+        }, 'Regenerate this action with stronger consistent-scale instructions.'));
+      } else if (scaleDrift >= QA_THRESHOLDS.scaleDriftWarnRatio) {
+        issues.push(makeQaIssue('warning', 'scale_drift', action, frame.index, 'Subject scale changes noticeably across frames.', {
+          scale_drift_ratio: round(scaleDrift),
+        }, 'Inspect the action; regenerate if the size jump is visible.'));
+      }
+    }
+  }
+
+  const errorCount = issues.filter((issue) => issue.severity === 'error').length;
+  const warningCount = issues.filter((issue) => issue.severity === 'warning').length;
+  return {
+    name: action,
+    status: errorCount > 0 ? 'fail' : (warningCount > 0 ? 'warn' : 'pass'),
+    summary: {
+      frames: frames.length,
+      errors: errorCount,
+      warnings: warningCount,
+    },
+    frames: frameReports,
+    issues,
+  };
+}
+
+function analyzeFrameQuality(action, index, frame, frameSize) {
+  const metrics = frameMetrics(frame, frameSize);
+  const issues = [];
+  if (!metrics.bounds || metrics.content_ratio < QA_THRESHOLDS.minContentRatioError) {
+    issues.push(makeQaIssue('error', 'blank_frame', action, index, 'Frame has no usable opaque subject pixels.', {
+      content_ratio: metrics.content_ratio,
+    }, 'Regenerate this action; a source cell is blank or background removal erased the subject.'));
+  } else {
+    if (metrics.subject_height_ratio < QA_THRESHOLDS.smallSubjectHeightRatioError) {
+      issues.push(makeQaIssue('error', 'subject_too_small', action, index, 'Subject is too small to be usable.', {
+        subject_height_ratio: metrics.subject_height_ratio,
+      }, 'Regenerate with a larger centered full-body subject.'));
+    } else if (metrics.subject_height_ratio < QA_THRESHOLDS.smallSubjectHeightRatioWarn) {
+      issues.push(makeQaIssue('warning', 'subject_too_small', action, index, 'Subject is small relative to the frame.', {
+        subject_height_ratio: metrics.subject_height_ratio,
+      }, 'Inspect whether the animation reads clearly at runtime size.'));
+    }
+
+    if (
+      metrics.opaque_ratio >= QA_THRESHOLDS.opaqueRatioError ||
+      (metrics.edge_opaque_ratio >= QA_THRESHOLDS.edgeOpaqueRatioError && metrics.min_margin_px <= 0)
+    ) {
+      issues.push(makeQaIssue('error', 'background_residue_or_crop_contact', action, index, 'Opaque pixels remain on frame edges or the frame is nearly fully opaque.', {
+        edge_opaque_ratio: metrics.edge_opaque_ratio,
+        opaque_ratio: metrics.opaque_ratio,
+        min_margin_px: metrics.min_margin_px,
+      }, 'Repack with a better --background/--tolerance or regenerate with a plain removable background.'));
+    } else if (metrics.edge_opaque_ratio >= QA_THRESHOLDS.edgeOpaqueRatioWarn || metrics.min_margin_px <= QA_THRESHOLDS.tightMarginWarnPx) {
+      issues.push(makeQaIssue('warning', 'tight_crop_or_edge_pixels', action, index, 'Subject is close to the frame edge or has minor edge opacity.', {
+        edge_opaque_ratio: metrics.edge_opaque_ratio,
+        min_margin_px: metrics.min_margin_px,
+      }, 'Inspect for clipped hair/effects or leftover background.'));
+    }
+  }
+
+  return {
+    index,
+    filename_index: index + 1,
+    status: issues.some((issue) => issue.severity === 'error') ? 'fail' : (issues.length ? 'warn' : 'pass'),
+    metrics,
+    issues,
+  };
+}
+
+function frameMetrics(frame, frameSize) {
+  let opaque = 0;
+  let edgeOpaque = 0;
+  let edgeTotal = 0;
+  let minX = frame.width;
+  let minY = frame.height;
+  let maxX = -1;
+  let maxY = -1;
+  const edgeWidth = 2;
+  for (let y = 0; y < frame.height; y += 1) {
+    for (let x = 0; x < frame.width; x += 1) {
+      const alpha = frame.data[(y * frame.width + x) * 4 + 3];
+      const onEdge = x < edgeWidth || y < edgeWidth || x >= frame.width - edgeWidth || y >= frame.height - edgeWidth;
+      if (onEdge) {
+        edgeTotal += 1;
+      }
+      if (alpha <= QA_THRESHOLDS.alpha) {
+        continue;
+      }
+      opaque += 1;
+      if (onEdge) {
+        edgeOpaque += 1;
+      }
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+
+  const total = frame.width * frame.height;
+  if (maxX < minX || maxY < minY) {
+    return {
+      width: frame.width,
+      height: frame.height,
+      expected_width: frameSize.width,
+      expected_height: frameSize.height,
+      opaque_pixels: opaque,
+      opaque_ratio: 0,
+      edge_opaque_ratio: 0,
+      content_ratio: 0,
+      min_margin_px: 0,
+      bounds: null,
+      center: null,
+      subject_width_ratio: 0,
+      subject_height_ratio: 0,
+      center_drift_ratio: null,
+      scale_drift_ratio: null,
+    };
+  }
+
+  const bounds = {
+    x: minX,
+    y: minY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1,
+    right: maxX,
+    bottom: maxY,
+  };
+  const margins = {
+    left: minX,
+    top: minY,
+    right: frame.width - maxX - 1,
+    bottom: frame.height - maxY - 1,
+  };
+  return {
+    width: frame.width,
+    height: frame.height,
+    expected_width: frameSize.width,
+    expected_height: frameSize.height,
+    opaque_pixels: opaque,
+    opaque_ratio: round(opaque / total),
+    edge_opaque_ratio: round(edgeOpaque / Math.max(1, edgeTotal)),
+    content_ratio: round(opaque / total),
+    min_margin_px: Math.min(margins.left, margins.top, margins.right, margins.bottom),
+    margins,
+    bounds,
+    center: {
+      x: round(bounds.x + bounds.width / 2),
+      y: round(bounds.y + bounds.height / 2),
+    },
+    subject_width_ratio: round(bounds.width / frame.width),
+    subject_height_ratio: round(bounds.height / frame.height),
+    center_drift_ratio: null,
+    scale_drift_ratio: null,
+  };
+}
+
+function makeQaIssue(severity, code, action, frameIndex, message, metrics, recommendation) {
+  return {
+    severity,
+    code,
+    action,
+    frame_index: frameIndex,
+    frame_number: frameIndex + 1,
+    message,
+    metrics,
+    recommendation,
+  };
+}
+
+function qaDiagnostics(qaReport) {
+  return qaReport.issues
+    .filter((issue) => issue.severity === 'error')
+    .slice(0, 12)
+    .map((issue) => ({
+      category: `qa_${issue.code}`,
+      message: `${issue.action} frame ${issue.frame_number}: ${issue.message}`,
+      next_step: issue.recommendation,
+    }));
+}
+
+function chooseQaRecommendation(errorCount, warningCount, issues) {
+  if (errorCount > 0) {
+    const codes = new Set(issues.filter((issue) => issue.severity === 'error').map((issue) => issue.code));
+    if (codes.has('blank_frame') || codes.has('center_drift') || codes.has('scale_drift') || codes.has('subject_too_small')) {
+      return 'Regenerate the failed action(s) or manually repair the listed frames.';
+    }
+    if (codes.has('background_residue_or_crop_contact')) {
+      return 'Repack with adjusted --background/--tolerance, or regenerate with a cleaner removable background.';
+    }
+    return 'Inspect qa_report.json and regenerate or repair failed frames.';
+  }
+  if (warningCount > 0) {
+    return 'Package is usable but should be visually inspected before runtime import.';
+  }
+  return 'Package passed structural QA.';
 }
 
 async function generateActionSheets(spec, rawDir, options) {
@@ -456,7 +775,7 @@ function trimTransparentBounds(image) {
 }
 
 function resizeAndPad(image, targetWidth, targetHeight) {
-  const scale = Math.min(targetWidth / image.width, targetHeight / image.height);
+  const scale = Math.min(targetWidth / image.width, targetHeight / image.height) * DEFAULT_FRAME_FIT_RATIO;
   const resizedWidth = Math.max(1, Math.round(image.width * scale));
   const resizedHeight = Math.max(1, Math.round(image.height * scale));
   const resized = resizeRgba(image, resizedWidth, resizedHeight);
@@ -689,6 +1008,14 @@ function normalizeBackground(value) {
   throw new Error('Invalid --background value. Use auto, none, or #rrggbb.');
 }
 
+function normalizeQaMode(value) {
+  const mode = String(value ?? DEFAULT_QA_MODE).trim().toLowerCase();
+  if (mode === 'strict' || mode === 'warn' || mode === 'off') {
+    return mode;
+  }
+  throw new Error('Invalid --qa value. Use strict, warn, or off.');
+}
+
 function normalizeTolerance(value) {
   if (value === undefined || value === null) {
     return DEFAULT_BACKGROUND_TOLERANCE;
@@ -739,6 +1066,21 @@ function extensionFromPath(path) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function median(values) {
+  const sorted = values.filter((value) => Number.isFinite(value)).sort((a, b) => a - b);
+  if (sorted.length === 0) {
+    return 0;
+  }
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[mid];
+}
+
+function round(value) {
+  return Number(Number(value).toFixed(4));
 }
 
 function hashName(value) {
