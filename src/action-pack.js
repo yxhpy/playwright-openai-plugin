@@ -793,7 +793,7 @@ function buildActionPrompt(spec, action, options = {}) {
     `Create one clean ${spec.grid.columns}x${spec.grid.rows} sprite sheet for the action "${action}".`,
     `Use exactly ${spec.framesPerAction} sequential animation frames in reading order.`,
     `Keep the same character across all frames: ${spec.character}.`,
-    'Use a plain removable background, centered full-body pose, consistent scale, no labels, no captions, no UI, and no extra panels.',
+    'Use a plain removable background, centered full-body pose, consistent scale, no labels, no captions, no UI, no extra panels, and no cast shadows or ground shadows.',
     'Return one image sheet only.',
   ];
   if (options.regenerationAttempt) {
@@ -888,7 +888,69 @@ function removeBackground(image, background, tolerance) {
       output.data[offset + 3] = Math.round(alpha * ratio);
     }
   }
+  suppressBackgroundSpill(output, colors, tolerance);
   return output;
+}
+
+function suppressBackgroundSpill(image, colors, tolerance) {
+  const chromaColors = colors
+    .map((color) => ({ color, chroma: normalizedChroma(color) }))
+    .filter((item) => item.chroma.saturation >= 0.25);
+  if (!chromaColors.length) {
+    return;
+  }
+
+  const removeThreshold = 0.18 + Math.min(0.05, tolerance / 1200);
+  const featherThreshold = removeThreshold + 0.10;
+  for (let offset = 0; offset < image.data.length; offset += 4) {
+    const alpha = image.data[offset + 3];
+    if (alpha === 0) {
+      continue;
+    }
+
+    const pixelChroma = normalizedChroma({
+      r: image.data[offset],
+      g: image.data[offset + 1],
+      b: image.data[offset + 2],
+    });
+    if (pixelChroma.saturation < 0.22) {
+      continue;
+    }
+
+    const chromaDistance = chromaColors.reduce(
+      (min, item) => Math.min(min, chromaDistanceTo(pixelChroma, item.chroma)),
+      Infinity,
+    );
+    if (chromaDistance <= removeThreshold) {
+      image.data[offset + 3] = 0;
+    } else if (chromaDistance <= featherThreshold) {
+      const ratio = (chromaDistance - removeThreshold) / (featherThreshold - removeThreshold);
+      image.data[offset + 3] = Math.min(image.data[offset + 3], Math.round(alpha * ratio));
+    }
+  }
+}
+
+function normalizedChroma(color) {
+  const total = color.r + color.g + color.b;
+  if (total <= 0) {
+    return { r: 0, g: 0, b: 0, saturation: 0 };
+  }
+  const max = Math.max(color.r, color.g, color.b);
+  const min = Math.min(color.r, color.g, color.b);
+  return {
+    r: color.r / total,
+    g: color.g / total,
+    b: color.b / total,
+    saturation: max <= 0 ? 0 : (max - min) / max,
+  };
+}
+
+function chromaDistanceTo(a, b) {
+  return Math.sqrt(
+    (a.r - b.r) ** 2 +
+    (a.g - b.g) ** 2 +
+    (a.b - b.b) ** 2,
+  );
 }
 
 function detectEdgeBackgroundColors(image) {

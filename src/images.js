@@ -1005,8 +1005,17 @@ async function waitForImageArtifacts(page, beforeArtifactCount, timeoutMs) {
   let artifactCount = await countImageArtifacts(page);
   while (Date.now() < deadline) {
     artifactCount = await countImageArtifacts(page);
-    if (artifactCount > beforeArtifactCount && !(await isGenerating(page))) {
-      return { completed: true, artifactCount, diagnostics: [] };
+    const state = classifyImageWaitState({
+      artifactCount,
+      beforeArtifactCount,
+      generating: await isGenerating(page),
+    });
+    if (state.completed) {
+      return {
+        completed: true,
+        artifactCount,
+        diagnostics: state.diagnostics,
+      };
     }
     await sleep(1000);
   }
@@ -1019,6 +1028,31 @@ async function waitForImageArtifacts(page, beforeArtifactCount, timeoutMs) {
         ? 'Timed out while the page still appears to be generating the image.'
         : 'Timed out waiting for generated image artifacts.',
       next_step: 'Inspect the visible browser. The image may still complete later; retry `poai image wait` before resubmitting.',
+    }],
+  };
+}
+
+export function classifyImageWaitState({ artifactCount, beforeArtifactCount, generating }) {
+  if (Number(artifactCount) <= Number(beforeArtifactCount)) {
+    return {
+      completed: false,
+      diagnostics: [],
+    };
+  }
+
+  if (!generating) {
+    return {
+      completed: true,
+      diagnostics: [],
+    };
+  }
+
+  return {
+    completed: true,
+    diagnostics: [{
+      category: 'stale_generation_indicator',
+      message: 'A generated image artifact is ready while the page still shows a generation/thinking indicator.',
+      next_step: 'Collect the ready artifact. Inspect the visible browser if you expected additional outputs.',
     }],
   };
 }

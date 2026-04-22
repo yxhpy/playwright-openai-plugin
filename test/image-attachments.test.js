@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { validateImageAttachmentFile } from '../src/images.js';
+import { classifyImageWaitState, validateImageAttachmentFile } from '../src/images.js';
 
 const ONE_PIXEL_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAFhQJ+Wn7zTAAAAABJRU5ErkJggg==',
@@ -75,6 +75,29 @@ test('validateImageAttachmentFile rejects directories without echoing local path
   } finally {
     await rm(dir, { recursive: true, force: true });
   }
+});
+
+test('classifyImageWaitState completes when a new artifact is ready despite stale generation UI', () => {
+  const result = classifyImageWaitState({
+    artifactCount: 2,
+    beforeArtifactCount: 1,
+    generating: true,
+  });
+
+  assert.equal(result.completed, true);
+  assert.equal(result.diagnostics.length, 1);
+  assert.equal(result.diagnostics[0].category, 'stale_generation_indicator');
+});
+
+test('classifyImageWaitState keeps waiting when no new artifact is available', () => {
+  const result = classifyImageWaitState({
+    artifactCount: 1,
+    beforeArtifactCount: 1,
+    generating: false,
+  });
+
+  assert.equal(result.completed, false);
+  assert.deepEqual(result.diagnostics, []);
 });
 
 async function makeTempDir() {

@@ -44,6 +44,27 @@ test('packageActionSheets splits frames, removes simple background, and writes p
   assert.ok(frame.data.some((value, index) => index % 4 === 3 && value > 0));
 });
 
+test('packageActionSheets removes dark background-hue foot shadow residue', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'poai-action-pack-shadow-'));
+  const sheetPath = join(dir, 'idle.png');
+  await writeShadowSheet(sheetPath);
+
+  const result = await packageActionSheets({
+    actions: ['idle'],
+    sheetPaths: { idle: sheetPath },
+    outputDir: dir,
+    grid: { columns: 3, rows: 3 },
+    framesPerAction: 9,
+    frameSize: { width: 64, height: 80 },
+    background: 'auto',
+    backgroundTolerance: 32,
+  });
+
+  const frame = PNG.sync.read(await readFile(join(result.packageDir, 'idle', 'idle_01.png')));
+  assert.equal(countGreenShadowPixels(frame), 0);
+  assert.ok(countOpaquePixels(frame) > 0);
+});
+
 test('runActionPackCreate packages existing sheets from a directory', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'poai-action-pack-create-'));
   const sourceDir = join(dir, 'source');
@@ -225,4 +246,74 @@ async function writeBlankSheet(path) {
   }
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, PNG.sync.write(sheet));
+}
+
+async function writeShadowSheet(path) {
+  const sheet = new PNG({ width: 36, height: 36 });
+  for (let y = 0; y < sheet.height; y += 1) {
+    for (let x = 0; x < sheet.width; x += 1) {
+      const offset = (y * sheet.width + x) * 4;
+      sheet.data[offset] = 30;
+      sheet.data[offset + 1] = 230;
+      sheet.data[offset + 2] = 24;
+      sheet.data[offset + 3] = 255;
+    }
+  }
+
+  for (let frame = 0; frame < 9; frame += 1) {
+    const column = frame % 3;
+    const row = Math.floor(frame / 3);
+    const cellWidth = Math.floor(sheet.width / 3);
+    const cellHeight = Math.floor(sheet.height / 3);
+    const baseX = column * cellWidth;
+    const baseY = row * cellHeight;
+    for (let y = baseY + 9; y < baseY + 11; y += 1) {
+      for (let x = baseX + 2; x < baseX + 10; x += 1) {
+        const offset = (y * sheet.width + x) * 4;
+        sheet.data[offset] = 8;
+        sheet.data[offset + 1] = 75;
+        sheet.data[offset + 2] = 6;
+        sheet.data[offset + 3] = 255;
+      }
+    }
+    for (let y = baseY + 3; y < baseY + 9; y += 1) {
+      for (let x = baseX + 4; x < baseX + 8; x += 1) {
+        const offset = (y * sheet.width + x) * 4;
+        sheet.data[offset] = 230;
+        sheet.data[offset + 1] = 230;
+        sheet.data[offset + 2] = 220;
+        sheet.data[offset + 3] = 255;
+      }
+    }
+  }
+
+  await mkdir(dirname(path), { recursive: true });
+  await writeFile(path, PNG.sync.write(sheet));
+}
+
+function countGreenShadowPixels(frame) {
+  let count = 0;
+  for (let y = 0; y < frame.height; y += 1) {
+    for (let x = 0; x < frame.width; x += 1) {
+      const offset = (y * frame.width + x) * 4;
+      const red = frame.data[offset];
+      const green = frame.data[offset + 1];
+      const blue = frame.data[offset + 2];
+      const alpha = frame.data[offset + 3];
+      if (alpha > 16 && green > red + 24 && green > blue + 24) {
+        count += 1;
+      }
+    }
+  }
+  return count;
+}
+
+function countOpaquePixels(frame) {
+  let count = 0;
+  for (let offset = 3; offset < frame.data.length; offset += 4) {
+    if (frame.data[offset] > 16) {
+      count += 1;
+    }
+  }
+  return count;
 }
