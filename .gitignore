@@ -5,3 +5,4 @@ node_modules/
 outputs/
 .playwright-openai/
 coverage/
+__pycache__/

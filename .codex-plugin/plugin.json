@@ -1,6 +1,6 @@
 {
   "name": "playwright-openai-plugin",
-  "version": "0.2.1",
+  "version": "0.3.0",
   "description": "Installable Codex plugin and local CLI for operating an already logged-in OpenAI/ChatGPT browser session through Playwright.",
   "author": {
     "name": "Local Operator",
@@ -21,7 +21,7 @@
   "interface": {
     "displayName": "Playwright OpenAI",
     "shortDescription": "Control a logged-in ChatGPT browser session from Codex.",
-    "longDescription": "Installable Codex plugin for the playwright-openai CLI. It helps Codex inspect, submit, wait, collect, revise, and diagnose ChatGPT web workflows through an already logged-in managed browser session without storing browser credentials.",
+    "longDescription": "Installable Codex plugin for the playwright-openai CLI. It helps Codex inspect, submit, wait, collect, revise, and diagnose ChatGPT web workflows through an already logged-in managed browser session without storing browser credentials. It also includes a GPT Image prompt-router skill backed by an attributed offline prompt catalogue.",
     "developerName": "Local Operator",
     "category": "Productivity",
     "capabilities": [
@@ -35,6 +35,7 @@
     "defaultPrompt": [
       "Inspect my current ChatGPT browser session.",
       "Generate an image and collect the result.",
+      "Find a GPT Image 2 prompt pattern for an image idea.",
       "Check whether an image job can wait, collect, or revise."
     ],
     "brandColor": "#10A37F"

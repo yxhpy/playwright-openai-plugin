@@ -50,6 +50,17 @@ scripts/poai image inspect --job-id <job-id> --json
 scripts/poai image revise --job-id <job-id> --prompt "Make it simpler" --json
 ```
 
+## GPT Image Prompt Router Skill
+
+The plugin also includes `skills/gpt-image-prompt-router/SKILL.md`, a Codex skill for routing image ideas to prompt patterns from the bundled `awesome-gpt-image-2` catalogue snapshot.
+
+```bash
+python3 skills/gpt-image-prompt-router/scripts/prompt_router.py route "电商主图 直播间 科技产品" --language zh --limit 5
+python3 skills/gpt-image-prompt-router/scripts/prompt_router.py show 13460 --language zh
+```
+
+The catalogue is adapted from [YouMind-OpenLab/awesome-gpt-image-2](https://github.com/YouMind-OpenLab/awesome-gpt-image-2) under CC BY 4.0, with source details in `skills/gpt-image-prompt-router/references/SOURCE.md`.
+
 ## Action Pack Workflow
 
 Generate or package animation action sheets into transparent frame PNGs, an atlas, GIF preview, QA report, manifest, and zip:
@@ -86,4 +97,7 @@ scripts/poai action-pack create \
 
 ## Included Codex Skill
 
-The plugin includes `skills/playwright-openai/SKILL.md`, which teaches Codex how to use the CLI safely.
+The plugin includes:
+
+- `skills/playwright-openai/SKILL.md`, which teaches Codex how to use the CLI safely.
+- `skills/gpt-image-prompt-router/SKILL.md`, which helps Codex find and adapt GPT Image 2 prompt examples before generation.

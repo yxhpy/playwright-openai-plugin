@@ -1,0 +1,4 @@
+interface:
+  display_name: "GPT Image Prompt Router"
+  short_description: "Route image ideas to prompt examples"
+  default_prompt: "Use $gpt-image-prompt-router to find a strong GPT Image 2 prompt pattern for my image idea."
