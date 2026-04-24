@@ -164,6 +164,8 @@ function sanitizeModel(model) {
     selected_label: safeString(model.selected_label),
     selected_testid: safeString(model.selected_testid),
     strategy: safeString(model.strategy),
+    routing_difficulty: safeString(model.routing_difficulty),
+    requested_thinking_effort: safeString(model.requested_thinking_effort),
   };
 }
 

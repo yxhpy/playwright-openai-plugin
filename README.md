@@ -50,6 +50,10 @@ scripts/poai image inspect --job-id <job-id> --json
 scripts/poai image revise --job-id <job-id> --prompt "Make it simpler" --json
 ```
 
+For image work, `--model auto` routes by generation difficulty. Simple requests use Instant; complex requests involving reference images, typography, layout, product detail, character consistency, sprites/action grids, or multi-panel structure use Thinking. For explicit quality-over-speed requests, use `--model thinking`, `--model extended`, or `--model heavy`.
+
+Pro is not the normal image-generation route because ChatGPT Pro currently does not expose image generation. A `--model pro` image request is treated as Pro-quality intent and routed to Thinking/Heavy rather than selecting Pro.
+
 ## GPT Image Prompt Router Skill
 
 The plugin also includes `skills/gpt-image-prompt-router/SKILL.md`, a Codex skill for routing image ideas to prompt patterns from the bundled `awesome-gpt-image-2` catalogue snapshot.

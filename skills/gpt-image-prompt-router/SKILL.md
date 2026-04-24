@@ -49,6 +49,8 @@ scripts/poai image wait --job-id <job-id> --json
 scripts/poai image collect --job-id <job-id> --json
 ```
 
+`--model auto` now routes by image-generation difficulty. Simple prompts use Instant; complex prompts with reference images, dense typography, layout, product detail, character consistency, sprites/action grids, or multi-panel structure use Thinking. For explicit quality-over-speed requests, use `--model thinking`, `--model extended`, or `--model heavy`. Avoid `--model pro` for image generation because ChatGPT Pro currently does not expose image generation.
+
 Keep browser safety rules from `playwright-openai`: do not store cookies, local storage, auth headers, full conversation URLs, generated source URLs, or prompt text in plugin manifests or job metadata.
 
 ## Resources

@@ -110,10 +110,11 @@ Quality gate behavior:
 
 ## Model Guidance
 
-- Image `--model auto` intentionally avoids Pro by selecting the top ChatGPT `Instant` model before opening Images.
-- Use `--model thinking` when generation quality or reference-image reasoning matters and the user accepts slower generation.
-- Use `--model pro` only when the user explicitly asks for Pro.
-- `--model standard` and `--model advanced` target Images surface mode controls for new image submissions only.
+- Image `--model auto` routes by prompt difficulty. Simple prompts use Instant; complex prompts with reference images, dense text, layout, product, character consistency, sprite/action, or multi-panel requirements select Thinking before opening Images.
+- Use `--model thinking`, `--model extended`, or `--model heavy` when generation quality or reference-image reasoning matters and the user accepts slower generation.
+- Do not use Pro as the normal image path: ChatGPT Pro does not currently expose image generation. If a user asks for Pro-quality image work, use Thinking/Heavy unless a future verified UI flow supports something else.
+- `--model light`, `--model low`, `--model medium`, `--model high`, and `--model xhigh` are accepted as image difficulty intent and currently map to Thinking selection. The plugin does not yet change the separate ChatGPT Web thinking-time toggle because that selector has not been verified live.
+- `--model standard` and `--model advanced` target Images surface mode controls for new image submissions only when that mode selector is visible in the current ChatGPT Images UI.
 
 ## Expected Local State
 

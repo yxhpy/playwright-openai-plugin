@@ -11,7 +11,7 @@ import {
   readJob,
   updateJob,
 } from './jobs.js';
-import { normalizeModelRequest, selectModelForAction } from './model.js';
+import { isImageModeRequest, normalizeModelRequest, resolveImageModelRequest, selectModelForAction } from './model.js';
 import { defaultImageOutputDir } from './paths.js';
 import { buildCandidateEndpoints } from './status.js';
 
@@ -93,7 +93,7 @@ export async function runImageSubmit(options = {}) {
   try {
     const modelPlan = await selectImageSubmitModel(browser, options);
     if (!modelPlan.ok) {
-      return imageFailureResult('image submit', 'model', null, endpoint, [modelPlan.diagnostic], 'Select a suitable non-Pro image model in the managed browser or retry with `--model instant`.');
+      return imageFailureResult('image submit', 'model', null, endpoint, [modelPlan.diagnostic], 'Select Instant, Thinking, or a supported Images mode in the managed browser, then retry.');
     }
 
     const page = await findOrOpenImagesPage(browser, { refresh: modelPlan.refreshImagesPage });
@@ -603,46 +603,49 @@ async function connectFirstAvailable(endpoints, options) {
 }
 
 async function selectImageSubmitModel(browser, options = {}) {
-  const requested = normalizeModelRequest(options.model);
-  if (isImageModeRequest(requested)) {
+  const routing = resolveImageModelRequest({
+    model: options.model,
+    prompt: options.prompt,
+    hasAttachment: Boolean(options.filePath),
+  });
+  if (isImageModeRequest(routing.targetModel)) {
     const page = await findOrOpenImagesPage(browser);
     const selection = await selectModelForAction(page, {
       capability: 'image',
-      requestedModel: requested,
+      requestedModel: routing.targetModel,
     });
     return selection.ok
-      ? { ok: true, selection, refreshImagesPage: false }
+      ? { ok: true, selection: enrichImageModelSelection(selection, routing), refreshImagesPage: false }
       : { ok: false, diagnostic: selection.diagnostic };
   }
 
   const page = await findOrOpenTopModelPage(browser);
   const selection = await selectModelForAction(page, {
     capability: 'chat',
-    requestedModel: imageTopModelRequest(requested),
+    requestedModel: imageTopModelRequest(routing.targetModel),
   });
   return selection.ok
     ? {
       ok: true,
-      selection: {
-        ...selection,
-        capability: 'image',
-        requested,
-        strategy: requested === 'auto' ? 'image_top_instant' : selection.strategy,
-      },
+      selection: enrichImageModelSelection(selection, routing),
       refreshImagesPage: true,
     }
     : { ok: false, diagnostic: selection.diagnostic };
 }
 
 async function selectImageRevisionModel(browser, preferredPage, options = {}) {
-  const requested = normalizeModelRequest(options.model);
-  if (isImageModeRequest(requested)) {
+  const routing = resolveImageModelRequest({
+    model: options.model,
+    prompt: options.prompt,
+    hasAttachment: Boolean(options.filePath),
+  });
+  if (isImageModeRequest(routing.targetModel)) {
     return {
       ok: false,
       diagnostic: {
         category: 'model_selection_failed',
         message: 'Images surface mode selection is only supported for new image submissions, not same-conversation revisions.',
-        next_step: 'Retry with `--model auto`, `--model instant`, `--model thinking`, or `--model pro`.',
+        next_step: 'Retry with `--model auto`, `--model instant`, `--model thinking`, `--model extended`, or `--model heavy`.',
       },
     };
   }
@@ -650,17 +653,12 @@ async function selectImageRevisionModel(browser, preferredPage, options = {}) {
   const page = await findTopModelPage(browser, preferredPage);
   const selection = await selectModelForAction(page, {
     capability: 'chat',
-    requestedModel: imageTopModelRequest(requested),
+    requestedModel: imageTopModelRequest(routing.targetModel),
   });
   return selection.ok
     ? {
       ok: true,
-      selection: {
-        ...selection,
-        capability: 'image',
-        requested,
-        strategy: requested === 'auto' ? 'image_top_instant' : selection.strategy,
-      },
+      selection: enrichImageModelSelection(selection, routing),
     }
     : { ok: false, diagnostic: selection.diagnostic };
 }
@@ -725,11 +723,21 @@ function imageTopModelRequest(requested) {
   if (requested === 'auto' || requested === 'image') {
     return 'instant';
   }
+  if (requested === 'pro') {
+    return 'thinking';
+  }
   return requested;
 }
 
-function isImageModeRequest(requested) {
-  return requested === 'standard' || requested === 'advanced';
+function enrichImageModelSelection(selection, routing) {
+  return {
+    ...selection,
+    capability: 'image',
+    requested: routing.requested,
+    strategy: routing.strategy,
+    routing_difficulty: routing.routingDifficulty,
+    requested_thinking_effort: routing.requestedThinkingEffort,
+  };
 }
 
 async function findOrOpenImagesPage(browser, options = {}) {

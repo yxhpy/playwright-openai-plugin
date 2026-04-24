@@ -21,18 +21,60 @@ const MODEL_OPTION_SELECTOR = [
 ].join(', ');
 
 const AUTO_PRIORITIES = {
-  chat: ['gpt-5-4-pro', 'pro', 'gpt-5-4-thinking', 'thinking', 'gpt-5-3', 'instant'],
+  chat: [
+    'gpt-5-5-pro',
+    'gpt-5.5-pro',
+    'pro',
+    'gpt-5-5-thinking',
+    'gpt-5.5-thinking',
+    'gpt-5-4-thinking',
+    'thinking',
+    'gpt-5-3',
+    'instant',
+  ],
   image: ['standard', '标准', 'image', '图片', 'advanced', '进阶'],
 };
 
 const MODEL_ALIASES = {
-  pro: ['gpt-5-4-pro', 'pro', '研究级', '专业'],
-  thinking: ['gpt-5-4-thinking', 'thinking', '复杂', '思考'],
-  instant: ['gpt-5-3', 'instant', '日常'],
+  pro: ['gpt-5-5-pro', 'gpt-5.5-pro', 'gpt-5-4-pro', 'gpt-5.4-pro', 'pro', '研究级', '专业'],
+  thinking: ['gpt-5-5-thinking', 'gpt-5.5-thinking', 'gpt-5-4-thinking', 'gpt-5.4-thinking', 'thinking', '复杂', '思考'],
+  instant: ['gpt-5-3', 'gpt-5.3', 'instant', '日常', '快速', 'fast'],
   image: ['image', 'images', '图片', 'standard', '标准'],
   standard: ['standard', '标准'],
   advanced: ['advanced', '进阶'],
 };
+
+const IMAGE_THINKING_EFFORT_ALIASES = {
+  light: 'light',
+  low: 'light',
+  'thinking-light': 'light',
+  'thinking-low': 'light',
+  medium: 'standard',
+  'thinking-medium': 'standard',
+  'thinking-standard': 'standard',
+  extended: 'extended',
+  high: 'extended',
+  deep: 'extended',
+  'thinking-extended': 'extended',
+  'thinking-high': 'extended',
+  heavy: 'heavy',
+  xhigh: 'heavy',
+  'extra-high': 'heavy',
+  'thinking-heavy': 'heavy',
+  'thinking-xhigh': 'heavy',
+};
+
+const IMAGE_DIFFICULTY_SIGNALS = [
+  { pattern: /文字|排版|字体|标题|文案|中英|日文|英文|typography|headline|copy|text|logo/i, weight: 2 },
+  { pattern: /信息图|图表|流程|结构|diagram|infographic|chart|workflow/i, weight: 2 },
+  { pattern: /电商|商品|产品|包装|主图|海报|广告|poster|banner|product|packaging|ecommerce/i, weight: 2 },
+  { pattern: /分镜|漫画|多格|多图|连贯|storyboard|comic|panel|sequence/i, weight: 2 },
+  { pattern: /一致性|保持|参考图|角色|IP|mascot|character|consistent|reference/i, weight: 2 },
+  { pattern: /透明背景|精灵|动作|帧|图集|sprite|atlas|transparent|animation|action/i, weight: 2 },
+  { pattern: /写实|摄影|真实|光影|材质|realistic|photorealistic|lighting|material/i, weight: 1 },
+  { pattern: /精确|严格|必须|exact|precise|must|no .*mistake/i, weight: 1 },
+  { pattern: /\b\d+\s*(?:个|张|frames?|panels?|items?|actions?)\b/i, weight: 1 },
+];
 
 export async function selectModelForAction(page, options = {}) {
   const capability = options.capability ?? 'chat';
@@ -163,12 +205,139 @@ export function sanitizeModelSelection(selection) {
     selected_label: selection.selected_label,
     selected_testid: selection.selected_testid,
     strategy: selection.strategy,
+    routing_difficulty: selection.routing_difficulty ?? null,
+    requested_thinking_effort: selection.requested_thinking_effort ?? null,
   };
 }
 
 export function normalizeModelRequest(value) {
   const text = String(value ?? 'auto').trim();
   return text ? text.toLowerCase() : 'auto';
+}
+
+export function resolveImageModelRequest(options = {}) {
+  const requested = normalizeModelRequest(options.model);
+  if (isImageModeRequest(requested)) {
+    return {
+      requested,
+      targetModel: requested,
+      routingDifficulty: null,
+      requestedThinkingEffort: null,
+      strategy: 'image_mode_explicit',
+    };
+  }
+
+  const requestedThinkingEffort = normalizeImageThinkingEffort(requested);
+  if (requested === 'thinking' || requestedThinkingEffort) {
+    return {
+      requested,
+      targetModel: 'thinking',
+      routingDifficulty: 'manual',
+      requestedThinkingEffort: requestedThinkingEffort ?? 'standard',
+      strategy: requestedThinkingEffort ? 'image_thinking_effort_explicit' : 'image_thinking_explicit',
+    };
+  }
+
+  if (requested === 'pro') {
+    return {
+      requested,
+      targetModel: 'thinking',
+      routingDifficulty: 'manual',
+      requestedThinkingEffort: 'heavy',
+      strategy: 'image_pro_unavailable_to_thinking',
+    };
+  }
+
+  if (requested === 'auto' || requested === 'image') {
+    const difficulty = classifyImagePromptDifficulty(options.prompt, {
+      hasAttachment: Boolean(options.hasAttachment),
+    });
+    return {
+      requested,
+      targetModel: difficulty.targetModel,
+      routingDifficulty: difficulty.level,
+      requestedThinkingEffort: difficulty.requestedThinkingEffort,
+      strategy: `image_auto_${difficulty.level}`,
+    };
+  }
+
+  return {
+    requested,
+    targetModel: requested,
+    routingDifficulty: null,
+    requestedThinkingEffort: null,
+    strategy: 'image_model_explicit',
+  };
+}
+
+export function classifyImagePromptDifficulty(prompt, options = {}) {
+  const text = String(prompt ?? '').trim();
+  const length = text.length;
+  let score = 0;
+
+  if (options.hasAttachment) {
+    score += 2;
+  }
+  if (length >= 1200) {
+    score += 3;
+  } else if (length >= 700) {
+    score += 2;
+  } else if (length >= 280) {
+    score += 1;
+  }
+
+  const separators = text.match(/[,\n;，；、]/g) ?? [];
+  if (separators.length >= 12) {
+    score += 2;
+  } else if (separators.length >= 6) {
+    score += 1;
+  }
+
+  for (const signal of IMAGE_DIFFICULTY_SIGNALS) {
+    if (signal.pattern.test(text)) {
+      score += signal.weight;
+    }
+  }
+
+  if (score >= 8) {
+    return {
+      level: 'expert',
+      targetModel: 'thinking',
+      requestedThinkingEffort: 'heavy',
+      score,
+    };
+  }
+  if (score >= 4) {
+    return {
+      level: 'complex',
+      targetModel: 'thinking',
+      requestedThinkingEffort: 'extended',
+      score,
+    };
+  }
+  if (score >= 2) {
+    return {
+      level: 'standard',
+      targetModel: 'instant',
+      requestedThinkingEffort: null,
+      score,
+    };
+  }
+  return {
+    level: 'simple',
+    targetModel: 'instant',
+    requestedThinkingEffort: null,
+    score,
+  };
+}
+
+export function normalizeImageThinkingEffort(requestedModel) {
+  return IMAGE_THINKING_EFFORT_ALIASES[normalizeModelRequest(requestedModel)] ?? null;
+}
+
+export function isImageModeRequest(requestedModel) {
+  const requested = normalizeModelRequest(requestedModel);
+  return requested === 'standard' || requested === 'advanced';
 }
 
 function canUseCurrentModel({ capability, requestedModel, currentLabel }) {
@@ -258,42 +427,59 @@ async function clickModelOption(page, choice) {
 }
 
 async function clickChatModelFallback(page, requestedModel) {
-  const target = chatModelFallbackTarget(requestedModel);
-  if (!target) {
+  const targets = chatModelFallbackTargets(requestedModel);
+  if (targets.length === 0) {
     return null;
   }
-  const option = page.locator(`[data-testid="${cssString(target.testid)}"]`).first();
-  if ((await option.count().catch(() => 0)) === 0) {
-    return null;
-  }
-  if (!(await option.isVisible().catch(() => false))) {
-    return null;
-  }
-  await option.click({ timeout: 5000 });
-  await page.waitForTimeout(500);
-  return target;
-}
-
-function chatModelFallbackTarget(requestedModel) {
-  if (requestedModel === 'auto' || requestedModel === 'pro') {
-    return {
-      testid: 'model-switcher-gpt-5-4-pro',
-      label: 'Pro 研究级智能模型',
-    };
-  }
-  if (requestedModel === 'thinking') {
-    return {
-      testid: 'model-switcher-gpt-5-4-thinking',
-      label: 'Thinking 适用于解答复杂问题',
-    };
-  }
-  if (requestedModel === 'instant') {
-    return {
-      testid: 'model-switcher-gpt-5-3',
-      label: 'Instant 适用于日常聊天',
-    };
+  for (const target of targets) {
+    const option = page.locator(`[data-testid="${cssString(target.testid)}"]`).first();
+    if ((await option.count().catch(() => 0)) === 0) {
+      continue;
+    }
+    if (!(await option.isVisible().catch(() => false))) {
+      continue;
+    }
+    await option.click({ timeout: 5000 });
+    await page.waitForTimeout(500);
+    return target;
   }
   return null;
+}
+
+function chatModelFallbackTargets(requestedModel) {
+  if (requestedModel === 'auto' || requestedModel === 'pro') {
+    return [
+      {
+        testid: 'model-switcher-gpt-5-5-pro',
+        label: 'Pro 研究级智能模型',
+      },
+      {
+        testid: 'model-switcher-gpt-5-4-pro',
+        label: 'Pro 研究级智能模型',
+      },
+    ];
+  }
+  if (requestedModel === 'thinking') {
+    return [
+      {
+        testid: 'model-switcher-gpt-5-5-thinking',
+        label: 'Thinking 适用于解答复杂问题',
+      },
+      {
+        testid: 'model-switcher-gpt-5-4-thinking',
+        label: 'Thinking 适用于解答复杂问题',
+      },
+    ];
+  }
+  if (requestedModel === 'instant') {
+    return [
+      {
+        testid: 'model-switcher-gpt-5-3',
+        label: 'Instant 适用于日常聊天',
+      },
+    ];
+  }
+  return [];
 }
 
 async function clickImageModeFallback(page, requestedModel) {

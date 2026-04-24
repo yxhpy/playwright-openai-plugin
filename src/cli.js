@@ -35,15 +35,15 @@ Usage:
   poai chat collect --job-id <id> [--json] [--text]
   poai chat jobs list [--json] [--text] [--status <status>] [--limit <n>]
   poai chat jobs cleanup [--json] [--text] [--status <status>] [--limit <n>] [--yes]
-  poai image send --prompt <text> [--file <path>] [--model <auto|instant|thinking|standard|advanced|label>] [--output-dir <path>] [--max-artifacts <n>] [--json] [--text] [--endpoint <url>] [--timeout-ms <ms>]
-  poai image submit --prompt <text> [--file <path>] [--model <auto|instant|thinking|standard|advanced|label>] [--json] [--text] [--endpoint <url>]
-  poai image revise --job-id <id> --prompt <text> [--file <path>] [--model <auto|instant|thinking|pro|label>] [--json] [--text]
+  poai image send --prompt <text> [--file <path>] [--model <auto|instant|thinking|light|low|medium|high|extended|heavy|xhigh|standard|advanced|label>] [--output-dir <path>] [--max-artifacts <n>] [--json] [--text] [--endpoint <url>] [--timeout-ms <ms>]
+  poai image submit --prompt <text> [--file <path>] [--model <auto|instant|thinking|light|low|medium|high|extended|heavy|xhigh|standard|advanced|label>] [--json] [--text] [--endpoint <url>]
+  poai image revise --job-id <id> --prompt <text> [--file <path>] [--model <auto|instant|thinking|light|low|medium|high|extended|heavy|xhigh|label>] [--json] [--text]
   poai image inspect --job-id <id> [--json] [--text]
   poai image wait --job-id <id> [--json] [--text] [--timeout-ms <ms>]
   poai image collect --job-id <id> [--output-dir <path>] [--max-artifacts <n>] [--json] [--text]
   poai image jobs list [--json] [--text] [--status <status>] [--limit <n>]
   poai image jobs cleanup [--json] [--text] [--status <status>] [--limit <n>] [--yes]
-  poai action-pack create [--character <text> | --from-dir <path>] [--actions <list>] [--file <path>] [--model <auto|instant|thinking|pro|label>] [--output-dir <path>] [--name <name>] [--grid <CxR>] [--frames-per-action <n>] [--frame-size <WxH>] [--background <auto|none|#rrggbb>] [--tolerance <n>] [--qa <strict|warn|off>] [--regen-failed] [--regen-attempts <n>] [--delay-ms <ms>] [--json] [--text] [--timeout-ms <ms>]
+  poai action-pack create [--character <text> | --from-dir <path>] [--actions <list>] [--file <path>] [--model <auto|instant|thinking|light|low|medium|high|extended|heavy|xhigh|label>] [--output-dir <path>] [--name <name>] [--grid <CxR>] [--frames-per-action <n>] [--frame-size <WxH>] [--background <auto|none|#rrggbb>] [--tolerance <n>] [--qa <strict|warn|off>] [--regen-failed] [--regen-attempts <n>] [--delay-ms <ms>] [--json] [--text] [--timeout-ms <ms>]
   poai browser launch [--json] [--text] [--port <n>] [--profile-dir <path>] [--chrome-path <path>] [--url <url>] [--headless]
   poai browser stop [--json] [--text]
 
@@ -59,8 +59,8 @@ Commands:
   chat collect            Collect the latest assistant response for a job.
   chat jobs list          List non-secret local chat job metadata.
   chat jobs cleanup       Preview or delete selected local chat job metadata.
-  image send              Select a non-Pro image model by default, optionally attach one image, submit, wait, and collect generated image artifacts.
-  image submit            Select a non-Pro image model by default, optionally attach one image, submit a prompt, and create a resumable job.
+  image send              Route by image prompt difficulty by default, optionally attach one image, submit, wait, and collect generated image artifacts.
+  image submit            Route by image prompt difficulty by default, optionally attach one image, submit a prompt, and create a resumable job.
   image revise            Continue an existing image job conversation with a new prompt and optional replacement reference image.
   image inspect           Read-only status for an image job: page, generation, artifacts, and next action.
   image wait              Wait for generated image artifacts to appear.
