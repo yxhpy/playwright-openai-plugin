@@ -43,7 +43,7 @@ Usage:
   poai image collect --job-id <id> [--output-dir <path>] [--max-artifacts <n>] [--json] [--text]
   poai image jobs list [--json] [--text] [--status <status>] [--limit <n>]
   poai image jobs cleanup [--json] [--text] [--status <status>] [--limit <n>] [--yes]
-  poai action-pack create [--character <text> | --from-dir <path>] [--actions <list>] [--file <path>] [--model <auto|instant|thinking|light|low|medium|high|extended|heavy|xhigh|label>] [--output-dir <path>] [--name <name>] [--grid <CxR>] [--frames-per-action <n>] [--frame-size <WxH>] [--background <auto|none|#rrggbb>] [--tolerance <n>] [--qa <strict|warn|off>] [--regen-failed] [--regen-attempts <n>] [--delay-ms <ms>] [--json] [--text] [--timeout-ms <ms>]
+  poai action-pack create [--character <text> | --from-dir <path>] [--actions <list>] [--file <path>] [--model <auto|instant|thinking|light|low|medium|high|extended|heavy|xhigh|label>] [--output-dir <path>] [--name <name>] [--grid <CxR>] [--frames-per-action <n>] [--frame-order <list>] [--frame-size <WxH>] [--background <auto|none|#rrggbb>] [--tolerance <n>] [--qa <strict|warn|off>] [--regen-failed] [--regen-attempts <n>] [--delay-ms <ms>] [--json] [--text] [--timeout-ms <ms>]
   poai browser launch [--json] [--text] [--port <n>] [--profile-dir <path>] [--chrome-path <path>] [--url <url>] [--headless]
   poai browser stop [--json] [--text]
 
@@ -99,6 +99,7 @@ function parseArgs(argv) {
     name: undefined,
     grid: undefined,
     framesPerAction: undefined,
+    frameOrder: undefined,
     frameSize: undefined,
     background: undefined,
     backgroundTolerance: undefined,
@@ -174,6 +175,9 @@ function parseArgs(argv) {
         throw new Error(`Invalid --frames-per-action value: ${args[i + 1]}`);
       }
       options.framesPerAction = value;
+      i += 1;
+    } else if (arg === '--frame-order') {
+      options.frameOrder = readValue(args, i, arg);
       i += 1;
     } else if (arg === '--frame-size') {
       options.frameSize = readValue(args, i, arg);

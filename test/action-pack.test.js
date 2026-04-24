@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, readdir, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { PNG } from 'pngjs';
-import { failedActionsFromQaReport, packageActionSheets, runActionPackCreate } from '../src/action-pack.js';
+import { failedActionsFromQaReport, packageActionSheets, runActionPackCreate, splitSpriteSheet } from '../src/action-pack.js';
 
 test('packageActionSheets splits frames, removes simple background, and writes package files', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'poai-action-pack-'));
@@ -96,6 +96,7 @@ test('runActionPackCreate returns diagnostics when generation input is incomplet
   });
 
   assert.equal(result.command, 'action-pack create');
+  assert.equal(result.ok, false);
   assert.equal(result.phase, 'generate');
   assert.equal(result.submitted, false);
   assert.match(result.next_step, /Missing --character/);
@@ -119,6 +120,73 @@ test('packageActionSheets center-crops sheets that are not exactly divisible by 
   assert.equal(frame.width, 16);
   assert.equal(frame.height, 20);
   assert.equal(result.frameCount, 9);
+});
+
+test('splitSpriteSheet recovers foreground poses that spill across source cell boundaries', () => {
+  const sheet = new PNG({ width: 40, height: 20 });
+  fillPng(sheet, { r: 0, g: 255, b: 0, a: 255 });
+  paintRect(sheet, { x: 12, y: 6, width: 12, height: 8, r: 230, g: 40, b: 60, a: 255 });
+  paintRect(sheet, { x: 26, y: 6, width: 8, height: 8, r: 70, g: 70, b: 230, a: 255 });
+
+  const frames = splitSpriteSheet(sheet, {
+    grid: { columns: 2, rows: 1 },
+    framesPerAction: 2,
+    frameSize: { width: 40, height: 40 },
+    background: 'auto',
+    backgroundTolerance: 32,
+  });
+
+  assert.equal(frames.length, 2);
+  assert.ok(opaqueBounds(frames[0]).width >= 34);
+});
+
+test('splitSpriteSheet keeps extracted poses on a shared bottom anchor', () => {
+  const sheet = new PNG({ width: 40, height: 20 });
+  fillPng(sheet, { r: 0, g: 255, b: 0, a: 255 });
+  paintRect(sheet, { x: 5, y: 3, width: 8, height: 12, r: 230, g: 40, b: 60, a: 255 });
+  paintRect(sheet, { x: 25, y: 8, width: 8, height: 7, r: 70, g: 70, b: 230, a: 255 });
+
+  const frames = splitSpriteSheet(sheet, {
+    grid: { columns: 2, rows: 1 },
+    framesPerAction: 2,
+    frameSize: { width: 40, height: 40 },
+    background: 'auto',
+    backgroundTolerance: 32,
+  });
+
+  assert.equal(opaqueBounds(frames[0]).bottom, 39);
+  assert.equal(opaqueBounds(frames[1]).bottom, 39);
+});
+
+test('packageActionSheets writes a contact sheet and can curate frame order', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'poai-action-pack-contact-'));
+  const sheetPath = join(dir, 'idle.png');
+  await writeSyntheticSheet(sheetPath, { width: 24, height: 24 });
+
+  const result = await packageActionSheets({
+    actions: ['idle'],
+    sheetPaths: { idle: sheetPath },
+    outputDir: dir,
+    grid: { columns: 2, rows: 2 },
+    framesPerAction: 4,
+    frameOrder: [1, 3, 2],
+    frameSize: { width: 32, height: 32 },
+    background: 'auto',
+    backgroundTolerance: 32,
+  });
+
+  const manifest = JSON.parse(await readFile(result.manifestPath, 'utf8'));
+  assert.equal(result.frameCount, 3);
+  assert.equal(manifest.frame_count, 3);
+  assert.equal(manifest.frames_per_action, 3);
+  assert.deepEqual(manifest.frame_order, [1, 3, 2]);
+  assert.equal(manifest.files.contact_sheet, 'contact_sheet.png');
+  assert.ok((await readFile(join(result.packageDir, 'contact_sheet.png'))).length > 0);
+  assert.deepEqual(await readdir(join(result.packageDir, 'idle')), [
+    'idle_01.png',
+    'idle_02.png',
+    'idle_03.png',
+  ]);
 });
 
 test('runActionPackCreate blocks blank sheets in strict QA mode', async () => {
@@ -289,6 +357,57 @@ async function writeShadowSheet(path) {
 
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, PNG.sync.write(sheet));
+}
+
+function fillPng(png, color) {
+  for (let y = 0; y < png.height; y += 1) {
+    for (let x = 0; x < png.width; x += 1) {
+      const offset = (y * png.width + x) * 4;
+      png.data[offset] = color.r;
+      png.data[offset + 1] = color.g;
+      png.data[offset + 2] = color.b;
+      png.data[offset + 3] = color.a;
+    }
+  }
+}
+
+function paintRect(png, rect) {
+  for (let y = rect.y; y < rect.y + rect.height; y += 1) {
+    for (let x = rect.x; x < rect.x + rect.width; x += 1) {
+      const offset = (y * png.width + x) * 4;
+      png.data[offset] = rect.r;
+      png.data[offset + 1] = rect.g;
+      png.data[offset + 2] = rect.b;
+      png.data[offset + 3] = rect.a;
+    }
+  }
+}
+
+function opaqueBounds(frame) {
+  let minX = frame.width;
+  let minY = frame.height;
+  let maxX = -1;
+  let maxY = -1;
+  for (let y = 0; y < frame.height; y += 1) {
+    for (let x = 0; x < frame.width; x += 1) {
+      const alpha = frame.data[(y * frame.width + x) * 4 + 3];
+      if (alpha <= 16) {
+        continue;
+      }
+      minX = Math.min(minX, x);
+      minY = Math.min(minY, y);
+      maxX = Math.max(maxX, x);
+      maxY = Math.max(maxY, y);
+    }
+  }
+  return {
+    x: minX,
+    y: minY,
+    right: maxX,
+    bottom: maxY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1,
+  };
 }
 
 function countGreenShadowPixels(frame) {

@@ -26,6 +26,8 @@ const DEFAULT_DELAY_MS = 90;
 const DEFAULT_BACKGROUND_TOLERANCE = 42;
 const DEFAULT_QA_MODE = 'strict';
 const DEFAULT_FRAME_FIT_RATIO = 0.90;
+const DEFAULT_FRAME_ANCHOR = 'bottom-center';
+const DEFAULT_SHEET_EXTRACTION = 'component';
 const QA_THRESHOLDS = {
   alpha: 16,
   minContentRatioError: 0.005,
@@ -70,6 +72,7 @@ export async function runActionPackCreate(options = {}) {
     grid: spec.grid,
     framesPerAction: spec.framesPerAction,
     frameSize: spec.frameSize,
+    frameOrder: spec.frameOrder,
     background: spec.background,
     backgroundTolerance: spec.backgroundTolerance,
     delayMs: spec.delayMs,
@@ -105,6 +108,7 @@ export async function runActionPackCreate(options = {}) {
         grid: spec.grid,
         framesPerAction: spec.framesPerAction,
         frameSize: spec.frameSize,
+        frameOrder: spec.frameOrder,
         background: spec.background,
         backgroundTolerance: spec.backgroundTolerance,
         delayMs: spec.delayMs,
@@ -133,8 +137,11 @@ export async function runActionPackCreate(options = {}) {
     actions: spec.actions,
     frame_size: spec.frameSize,
     grid: spec.grid,
-    frames_per_action: spec.framesPerAction,
+    source_frames_per_action: packaged.sourceFramesPerAction,
+    frames_per_action: packaged.framesPerAction,
+    frame_order: packaged.frameOrder,
     frame_count: packaged.frameCount,
+    contact_sheet: packaged.contactSheetPath,
     qa_mode: spec.qaMode,
     qa_status: packaged.qaReport.status,
     qa_summary: packaged.qaReport.summary,
@@ -157,6 +164,7 @@ export async function packageActionSheets({
   grid = DEFAULT_GRID,
   framesPerAction = grid.columns * grid.rows,
   frameSize = DEFAULT_FRAME_SIZE,
+  frameOrder = null,
   background = 'auto',
   backgroundTolerance = DEFAULT_BACKGROUND_TOLERANCE,
   delayMs = DEFAULT_DELAY_MS,
@@ -166,7 +174,9 @@ export async function packageActionSheets({
   const normalizedActions = normalizeActions(actions);
   const normalizedGrid = normalizeGrid(grid);
   const normalizedFrameSize = normalizeFrameSize(frameSize);
-  const frameLimit = normalizeFramesPerAction(framesPerAction, normalizedGrid);
+  const sourceFrameLimit = normalizeFramesPerAction(framesPerAction, normalizedGrid);
+  const normalizedFrameOrder = normalizeFrameOrder(frameOrder, sourceFrameLimit);
+  const frameLimit = normalizedFrameOrder ? normalizedFrameOrder.length : sourceFrameLimit;
   const normalizedQaMode = normalizeQaMode(qaMode);
   const packageDir = join(resolve(outputDir), 'package');
   const rawPackageDir = join(packageDir, 'raw');
@@ -186,24 +196,26 @@ export async function packageActionSheets({
 
     const frames = splitSpriteSheet(source, {
       grid: normalizedGrid,
-      framesPerAction: frameLimit,
+      framesPerAction: sourceFrameLimit,
       frameSize: normalizedFrameSize,
       background,
       backgroundTolerance,
     });
+    const selectedFrames = applyFrameOrder(frames, normalizedFrameOrder);
     const actionDir = join(packageDir, action);
     await mkdir(actionDir, { recursive: true });
     const frameFiles = [];
-    for (let i = 0; i < frames.length; i += 1) {
+    for (let i = 0; i < selectedFrames.length; i += 1) {
       const filename = `${action}_${String(i + 1).padStart(2, '0')}.png`;
       const framePath = join(actionDir, filename);
-      await writePng(framePath, frames[i]);
+      await writePng(framePath, selectedFrames[i]);
       frameFiles.push(`${action}/${filename}`);
     }
-    framesByAction.set(action, frames);
+    framesByAction.set(action, selectedFrames);
     manifestActions.push({
       name: action,
       source_sheet: `raw/${basename(rawTarget)}`,
+      source_frame_order: normalizedFrameOrder ?? [...Array(sourceFrameLimit)].map((_, index) => index + 1),
       frames: frameFiles,
     });
   }
@@ -211,6 +223,9 @@ export async function packageActionSheets({
   const atlas = buildAtlas(framesByAction, normalizedActions, frameLimit, normalizedFrameSize);
   const atlasPath = join(packageDir, 'action_pack_atlas.png');
   await writePng(atlasPath, atlas);
+
+  const contactSheetPath = join(packageDir, 'contact_sheet.png');
+  await writePng(contactSheetPath, buildContactSheet(framesByAction, normalizedActions, frameLimit, normalizedFrameSize));
 
   const animationGifPath = join(packageDir, 'action_pack_animation.gif');
   await writeFile(animationGifPath, buildGif(framesByAction, normalizedActions, delayMs));
@@ -228,14 +243,19 @@ export async function packageActionSheets({
     action_order: normalizedActions,
     frame_size: normalizedFrameSize,
     grid: normalizedGrid,
+    source_frames_per_action: sourceFrameLimit,
     frames_per_action: frameLimit,
+    frame_order: normalizedFrameOrder ?? [...Array(sourceFrameLimit)].map((_, index) => index + 1),
     frame_count: normalizedActions.length * frameLimit,
+    frame_anchor: DEFAULT_FRAME_ANCHOR,
+    sheet_extraction: background === 'none' ? 'cell' : DEFAULT_SHEET_EXTRACTION,
     background: {
       mode: background,
       tolerance: background === 'none' ? 0 : backgroundTolerance,
     },
     files: {
       atlas: 'action_pack_atlas.png',
+      contact_sheet: 'contact_sheet.png',
       animation_gif: 'action_pack_animation.gif',
       qa_report: 'qa_report.json',
     },
@@ -264,9 +284,13 @@ export async function packageActionSheets({
     packageZip,
     manifestPath,
     atlasPath,
+    contactSheetPath,
     animationGifPath,
     qaReportPath,
     qaReport,
+    sourceFramesPerAction: sourceFrameLimit,
+    framesPerAction: frameLimit,
+    frameOrder: normalizedFrameOrder ?? [...Array(sourceFrameLimit)].map((_, index) => index + 1),
     frameCount: manifest.frame_count,
   };
 }
@@ -277,6 +301,8 @@ export function splitSpriteSheet(source, {
   frameSize = DEFAULT_FRAME_SIZE,
   background = 'auto',
   backgroundTolerance = DEFAULT_BACKGROUND_TOLERANCE,
+  frameAnchor = DEFAULT_FRAME_ANCHOR,
+  sheetExtraction = DEFAULT_SHEET_EXTRACTION,
 } = {}) {
   const normalizedGrid = normalizeGrid(grid);
   const normalizedFrameSize = normalizeFrameSize(frameSize);
@@ -292,14 +318,26 @@ export function splitSpriteSheet(source, {
   }
   const cellWidth = splitSource.width / normalizedGrid.columns;
   const cellHeight = splitSource.height / normalizedGrid.rows;
+  const recoveredSheet = background === 'none'
+    ? null
+    : removeBackground(splitSource, background, backgroundTolerance);
+  const recoveredBounds = recoveredSheet && sheetExtraction === 'component'
+    ? detectForegroundFrameBounds(recoveredSheet, normalizedGrid, frameLimit, cellWidth, cellHeight)
+    : null;
   const frames = [];
   for (let index = 0; index < frameLimit; index += 1) {
     const column = index % normalizedGrid.columns;
     const row = Math.floor(index / normalizedGrid.columns);
-    const cell = extractRgba(splitSource, column * cellWidth, row * cellHeight, cellWidth, cellHeight);
-    const removed = removeBackground(cell, background, backgroundTolerance);
-    const trimmed = trimTransparentBounds(removed);
-    frames.push(resizeAndPad(trimmed, normalizedFrameSize.width, normalizedFrameSize.height));
+    const recovered = recoveredBounds?.[index] && recoveredSheet
+      ? extractBounds(recoveredSheet, recoveredBounds[index])
+      : null;
+    const cell = recovered ?? removeBackground(
+      extractRgba(splitSource, column * cellWidth, row * cellHeight, cellWidth, cellHeight),
+      background,
+      backgroundTolerance,
+    );
+    const trimmed = trimTransparentBounds(cell);
+    frames.push(resizeAndPad(trimmed, normalizedFrameSize.width, normalizedFrameSize.height, frameAnchor));
   }
   return frames;
 }
@@ -310,12 +348,175 @@ function cropCentered(source, width, height) {
   return extractRgba(source, sourceX, sourceY, width, height);
 }
 
+function detectForegroundFrameBounds(image, grid, frameLimit, cellWidth, cellHeight) {
+  const components = findForegroundComponents(image);
+  if (components.length === 0) {
+    return null;
+  }
+
+  const boundsByFrame = Array(frameLimit).fill(null);
+  for (const component of components) {
+    const frameIndex = nearestFrameIndex(component.center.x, component.center.y, grid, frameLimit, cellWidth, cellHeight);
+    boundsByFrame[frameIndex] = mergeBounds(boundsByFrame[frameIndex], component.bounds);
+  }
+
+  return boundsByFrame.map((bounds) => bounds ? expandBounds(bounds, image.width, image.height, 1) : null);
+}
+
+function findForegroundComponents(image) {
+  const width = image.width;
+  const height = image.height;
+  const visited = new Uint8Array(width * height);
+  const minArea = Math.max(4, Math.floor(width * height * 0.0002));
+  const components = [];
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const start = y * width + x;
+      if (visited[start] || !isForegroundPixel(image, x, y)) {
+        visited[start] = 1;
+        continue;
+      }
+
+      const stack = [start];
+      visited[start] = 1;
+      let area = 0;
+      let sumX = 0;
+      let sumY = 0;
+      let minX = x;
+      let minY = y;
+      let maxX = x;
+      let maxY = y;
+
+      while (stack.length) {
+        const current = stack.pop();
+        const cx = current % width;
+        const cy = Math.floor(current / width);
+        area += 1;
+        sumX += cx;
+        sumY += cy;
+        minX = Math.min(minX, cx);
+        minY = Math.min(minY, cy);
+        maxX = Math.max(maxX, cx);
+        maxY = Math.max(maxY, cy);
+
+        const neighbors = [
+          current - width,
+          current + width,
+          cx > 0 ? current - 1 : -1,
+          cx < width - 1 ? current + 1 : -1,
+        ];
+        for (const next of neighbors) {
+          if (next < 0 || next >= visited.length || visited[next]) {
+            continue;
+          }
+          const nx = next % width;
+          const ny = Math.floor(next / width);
+          if (isForegroundPixel(image, nx, ny)) {
+            visited[next] = 1;
+            stack.push(next);
+          } else {
+            visited[next] = 1;
+          }
+        }
+      }
+
+      if (area >= minArea) {
+        components.push({
+          area,
+          center: {
+            x: sumX / area,
+            y: sumY / area,
+          },
+          bounds: {
+            x: minX,
+            y: minY,
+            right: maxX,
+            bottom: maxY,
+            width: maxX - minX + 1,
+            height: maxY - minY + 1,
+          },
+        });
+      }
+    }
+  }
+
+  return components;
+}
+
+function isForegroundPixel(image, x, y) {
+  return image.data[(y * image.width + x) * 4 + 3] > QA_THRESHOLDS.alpha;
+}
+
+function nearestFrameIndex(x, y, grid, frameLimit, cellWidth, cellHeight) {
+  let bestIndex = 0;
+  let bestDistance = Infinity;
+  for (let index = 0; index < frameLimit; index += 1) {
+    const column = index % grid.columns;
+    const row = Math.floor(index / grid.columns);
+    const centerX = column * cellWidth + cellWidth / 2;
+    const centerY = row * cellHeight + cellHeight / 2;
+    const distance = (x - centerX) ** 2 + (y - centerY) ** 2;
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestIndex = index;
+    }
+  }
+  return bestIndex;
+}
+
+function mergeBounds(a, b) {
+  if (!a) {
+    return { ...b };
+  }
+  const x = Math.min(a.x, b.x);
+  const y = Math.min(a.y, b.y);
+  const right = Math.max(a.right, b.right);
+  const bottom = Math.max(a.bottom, b.bottom);
+  return {
+    x,
+    y,
+    right,
+    bottom,
+    width: right - x + 1,
+    height: bottom - y + 1,
+  };
+}
+
+function expandBounds(bounds, imageWidth, imageHeight, padding) {
+  const x = clamp(bounds.x - padding, 0, imageWidth - 1);
+  const y = clamp(bounds.y - padding, 0, imageHeight - 1);
+  const right = clamp(bounds.right + padding, 0, imageWidth - 1);
+  const bottom = clamp(bounds.bottom + padding, 0, imageHeight - 1);
+  return {
+    x,
+    y,
+    right,
+    bottom,
+    width: right - x + 1,
+    height: bottom - y + 1,
+  };
+}
+
+function extractBounds(source, bounds) {
+  return extractRgba(source, bounds.x, bounds.y, bounds.width, bounds.height);
+}
+
+function applyFrameOrder(frames, frameOrder) {
+  if (!frameOrder) {
+    return frames;
+  }
+  return frameOrder.map((frameNumber) => frames[frameNumber - 1]);
+}
+
 function normalizeActionPackOptions(options = {}) {
   const grid = normalizeGrid(parseSizeLike(options.grid, DEFAULT_GRID, 'grid'));
+  const framesPerAction = normalizeFramesPerAction(options.framesPerAction, grid);
   return {
     actions: normalizeActions(options.actions),
     grid,
-    framesPerAction: normalizeFramesPerAction(options.framesPerAction, grid),
+    framesPerAction,
+    frameOrder: normalizeFrameOrder(options.frameOrder, framesPerAction),
     frameSize: normalizeFrameSize(parseSizeLike(options.frameSize, DEFAULT_FRAME_SIZE, 'frame-size')),
     outputDir: options.outputDir,
     fromDir: options.fromDir ? resolve(String(options.fromDir)) : null,
@@ -545,17 +746,21 @@ function analyzeFrameQuality(action, index, frame, frameSize) {
 
     if (
       metrics.opaque_ratio >= QA_THRESHOLDS.opaqueRatioError ||
-      (metrics.edge_opaque_ratio >= QA_THRESHOLDS.edgeOpaqueRatioError && metrics.min_margin_px <= 0)
+      (metrics.crop_edge_opaque_ratio >= QA_THRESHOLDS.edgeOpaqueRatioError && metrics.crop_min_margin_px <= 0)
     ) {
       issues.push(makeQaIssue('error', 'background_residue_or_crop_contact', action, index, 'Opaque pixels remain on frame edges or the frame is nearly fully opaque.', {
         edge_opaque_ratio: metrics.edge_opaque_ratio,
+        crop_edge_opaque_ratio: metrics.crop_edge_opaque_ratio,
         opaque_ratio: metrics.opaque_ratio,
         min_margin_px: metrics.min_margin_px,
+        crop_min_margin_px: metrics.crop_min_margin_px,
       }, 'Repack with a better --background/--tolerance or regenerate with a plain removable background.'));
-    } else if (metrics.edge_opaque_ratio >= QA_THRESHOLDS.edgeOpaqueRatioWarn || metrics.min_margin_px <= QA_THRESHOLDS.tightMarginWarnPx) {
+    } else if (metrics.crop_edge_opaque_ratio >= QA_THRESHOLDS.edgeOpaqueRatioWarn || metrics.crop_min_margin_px <= QA_THRESHOLDS.tightMarginWarnPx) {
       issues.push(makeQaIssue('warning', 'tight_crop_or_edge_pixels', action, index, 'Subject is close to the frame edge or has minor edge opacity.', {
         edge_opaque_ratio: metrics.edge_opaque_ratio,
+        crop_edge_opaque_ratio: metrics.crop_edge_opaque_ratio,
         min_margin_px: metrics.min_margin_px,
+        crop_min_margin_px: metrics.crop_min_margin_px,
       }, 'Inspect for clipped hair/effects or leftover background.'));
     }
   }
@@ -572,7 +777,9 @@ function analyzeFrameQuality(action, index, frame, frameSize) {
 function frameMetrics(frame, frameSize) {
   let opaque = 0;
   let edgeOpaque = 0;
+  let cropEdgeOpaque = 0;
   let edgeTotal = 0;
+  let cropEdgeTotal = 0;
   let minX = frame.width;
   let minY = frame.height;
   let maxX = -1;
@@ -582,8 +789,12 @@ function frameMetrics(frame, frameSize) {
     for (let x = 0; x < frame.width; x += 1) {
       const alpha = frame.data[(y * frame.width + x) * 4 + 3];
       const onEdge = x < edgeWidth || y < edgeWidth || x >= frame.width - edgeWidth || y >= frame.height - edgeWidth;
+      const onCropEdge = x < edgeWidth || y < edgeWidth || x >= frame.width - edgeWidth;
       if (onEdge) {
         edgeTotal += 1;
+      }
+      if (onCropEdge) {
+        cropEdgeTotal += 1;
       }
       if (alpha <= QA_THRESHOLDS.alpha) {
         continue;
@@ -591,6 +802,9 @@ function frameMetrics(frame, frameSize) {
       opaque += 1;
       if (onEdge) {
         edgeOpaque += 1;
+      }
+      if (onCropEdge) {
+        cropEdgeOpaque += 1;
       }
       minX = Math.min(minX, x);
       minY = Math.min(minY, y);
@@ -609,8 +823,10 @@ function frameMetrics(frame, frameSize) {
       opaque_pixels: opaque,
       opaque_ratio: 0,
       edge_opaque_ratio: 0,
+      crop_edge_opaque_ratio: 0,
       content_ratio: 0,
       min_margin_px: 0,
+      crop_min_margin_px: 0,
       bounds: null,
       center: null,
       subject_width_ratio: 0,
@@ -642,8 +858,10 @@ function frameMetrics(frame, frameSize) {
     opaque_pixels: opaque,
     opaque_ratio: round(opaque / total),
     edge_opaque_ratio: round(edgeOpaque / Math.max(1, edgeTotal)),
+    crop_edge_opaque_ratio: round(cropEdgeOpaque / Math.max(1, cropEdgeTotal)),
     content_ratio: round(opaque / total),
     min_margin_px: Math.min(margins.left, margins.top, margins.right, margins.bottom),
+    crop_min_margin_px: Math.min(margins.left, margins.top, margins.right),
     margins,
     bounds,
     center: {
@@ -792,8 +1010,10 @@ function buildActionPrompt(spec, action, options = {}) {
   const lines = [
     `Create one clean ${spec.grid.columns}x${spec.grid.rows} sprite sheet for the action "${action}".`,
     `Use exactly ${spec.framesPerAction} sequential animation frames in reading order.`,
+    `Each frame is a fixed ${spec.frameSize.width}x${spec.frameSize.height} game-sprite cell; keep the character fully inside each cell and make the motion read as a continuous frame sequence.`,
     `Keep the same character across all frames: ${spec.character}.`,
-    'Use a plain removable background, centered full-body pose, consistent scale, no labels, no captions, no UI, no extra panels, and no cast shadows or ground shadows.',
+    'Use a plain removable high-contrast background, centered full-body pose, consistent scale, one shared feet/bottom anchor, no labels, no captions, no UI, no extra panels, and no cast shadows or ground shadows.',
+    'Pixel-art requests should follow a crisp pixel grid; avoid anti-aliased blur, merged neighboring poses, and body parts crossing into adjacent cells.',
     'Return one image sheet only.',
   ];
   if (options.regenerationAttempt) {
@@ -1017,14 +1237,16 @@ function trimTransparentBounds(image) {
   return extractRgba(image, minX, minY, maxX - minX + 1, maxY - minY + 1);
 }
 
-function resizeAndPad(image, targetWidth, targetHeight) {
+function resizeAndPad(image, targetWidth, targetHeight, anchor = DEFAULT_FRAME_ANCHOR) {
   const scale = Math.min(targetWidth / image.width, targetHeight / image.height) * DEFAULT_FRAME_FIT_RATIO;
   const resizedWidth = Math.max(1, Math.round(image.width * scale));
   const resizedHeight = Math.max(1, Math.round(image.height * scale));
   const resized = resizeRgba(image, resizedWidth, resizedHeight);
   const output = new PNG({ width: targetWidth, height: targetHeight });
   const startX = Math.floor((targetWidth - resizedWidth) / 2);
-  const startY = Math.floor((targetHeight - resizedHeight) / 2);
+  const startY = anchor === 'bottom-center'
+    ? targetHeight - resizedHeight
+    : Math.floor((targetHeight - resizedHeight) / 2);
   pastePng(output, resized, startX, startY);
   return output;
 }
@@ -1104,6 +1326,94 @@ function buildAtlas(framesByAction, actions, framesPerAction, frameSize) {
   });
   return atlas;
 }
+
+function buildContactSheet(framesByAction, actions, framesPerAction, frameSize) {
+  const labelHeight = 12;
+  const cellHeight = frameSize.height + labelHeight;
+  const contact = new PNG({
+    width: framesPerAction * frameSize.width,
+    height: actions.length * cellHeight,
+  });
+  fillPng(contact, { r: 246, g: 247, b: 249, a: 255 });
+  actions.forEach((action, actionIndex) => {
+    const frames = framesByAction.get(action) ?? [];
+    for (let frameIndex = 0; frameIndex < framesPerAction; frameIndex += 1) {
+      const x = frameIndex * frameSize.width;
+      const y = actionIndex * cellHeight;
+      drawTileBackground(contact, x, y + labelHeight, frameSize.width, frameSize.height);
+      drawLabel(contact, x + 2, y + 2, `F${String(frameIndex + 1).padStart(2, '0')}`);
+      pastePng(contact, frames[frameIndex], x, y + labelHeight);
+    }
+  });
+  return contact;
+}
+
+function fillPng(image, color) {
+  for (let offset = 0; offset < image.data.length; offset += 4) {
+    image.data[offset] = color.r;
+    image.data[offset + 1] = color.g;
+    image.data[offset + 2] = color.b;
+    image.data[offset + 3] = color.a;
+  }
+}
+
+function drawTileBackground(image, startX, startY, width, height) {
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const targetX = startX + x;
+      const targetY = startY + y;
+      const offset = (targetY * image.width + targetX) * 4;
+      const checker = (Math.floor(x / 8) + Math.floor(y / 8)) % 2 === 0 ? 226 : 238;
+      image.data[offset] = checker;
+      image.data[offset + 1] = checker;
+      image.data[offset + 2] = checker;
+      image.data[offset + 3] = 255;
+    }
+  }
+}
+
+function drawLabel(image, x, y, label) {
+  let cursor = x;
+  for (const char of label.toUpperCase()) {
+    drawGlyph(image, cursor, y, GLYPHS[char] ?? GLYPHS[' ']);
+    cursor += 4;
+  }
+}
+
+function drawGlyph(image, x, y, glyph) {
+  for (let row = 0; row < glyph.length; row += 1) {
+    for (let column = 0; column < glyph[row].length; column += 1) {
+      if (glyph[row][column] !== '1') {
+        continue;
+      }
+      const targetX = x + column;
+      const targetY = y + row;
+      if (targetX < 0 || targetY < 0 || targetX >= image.width || targetY >= image.height) {
+        continue;
+      }
+      const offset = (targetY * image.width + targetX) * 4;
+      image.data[offset] = 31;
+      image.data[offset + 1] = 41;
+      image.data[offset + 2] = 55;
+      image.data[offset + 3] = 255;
+    }
+  }
+}
+
+const GLYPHS = {
+  ' ': ['000', '000', '000', '000', '000'],
+  F: ['111', '100', '111', '100', '100'],
+  0: ['111', '101', '101', '101', '111'],
+  1: ['010', '110', '010', '010', '111'],
+  2: ['111', '001', '111', '100', '111'],
+  3: ['111', '001', '111', '001', '111'],
+  4: ['101', '101', '111', '001', '001'],
+  5: ['111', '100', '111', '001', '111'],
+  6: ['111', '100', '111', '101', '111'],
+  7: ['111', '001', '010', '010', '010'],
+  8: ['111', '101', '111', '101', '111'],
+  9: ['111', '101', '111', '001', '111'],
+};
 
 function buildGif(framesByAction, actions, delayMs) {
   const { GIFEncoder, quantize, applyPalette } = gifenc;
@@ -1229,6 +1539,33 @@ function normalizeFramesPerAction(value, grid) {
   return frameCount;
 }
 
+function normalizeFrameOrder(value, sourceFrameCount) {
+  if (value === undefined || value === null || value === '') {
+    return null;
+  }
+  const rawItems = Array.isArray(value)
+    ? value
+    : String(value).split(/[,>;\-\s\u2192]+/);
+  const order = rawItems
+    .map((item) => String(item).trim().replace(/^f/i, ''))
+    .filter(Boolean)
+    .map((item) => Number(item));
+  if (order.length === 0) {
+    return null;
+  }
+  const seen = new Set();
+  for (const frameNumber of order) {
+    if (!Number.isInteger(frameNumber) || frameNumber < 1 || frameNumber > sourceFrameCount) {
+      throw new Error(`Invalid --frame-order value. Use frame numbers from 1 to ${sourceFrameCount}.`);
+    }
+    if (seen.has(frameNumber)) {
+      throw new Error('Invalid --frame-order value. Duplicate frame numbers are not supported.');
+    }
+    seen.add(frameNumber);
+  }
+  return order;
+}
+
 function parseSizeLike(value, fallback, label) {
   if (value === undefined || value === null) {
     return fallback;
@@ -1343,7 +1680,7 @@ function hashName(value) {
 
 function actionPackFailure(phase, diagnostics, nextStep) {
   return {
-    ok: true,
+    ok: false,
     command: 'action-pack create',
     phase,
     submitted: false,

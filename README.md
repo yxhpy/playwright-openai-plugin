@@ -78,6 +78,27 @@ scripts/poai action-pack create \
 
 Strict QA runs by default and writes `package/qa_report.json`. If QA finds severe structural issues, the command returns `completed=false` and recommends regeneration or reprocessing. Use `--qa warn` only when you want to keep a suspect package for inspection.
 
+For game-ready continuous-frame sprites, the action-pack flow treats the raw sheet as a source image rather than trusting naive cell crops:
+
+- generate with a pixel-grid-aware prompt/reference so poses stay close to fixed cells;
+- recover foreground pose components across the whole sheet before splitting, which protects feet, hats, and effects that slightly cross cell boundaries;
+- remove the removable background per recovered frame;
+- normalize each frame onto a shared bottom-center anchor so the character does not drift or bob during playback;
+- write `package/contact_sheet.png` for quick frame review and manual curation.
+
+Use `--frame-order` when the raw sequence needs hand curation or rhythm fixes:
+
+```bash
+scripts/poai action-pack create \
+  --from-dir ./outputs/raw-sheets \
+  --actions attack \
+  --grid 2x5 \
+  --frames-per-action 10 \
+  --frame-order F01,F03,F02,F04,F05,F07,F09 \
+  --frame-size 256x256 \
+  --output-dir ./outputs/attack-curated
+```
+
 For browser-backed generation, add `--regen-failed --regen-attempts 1` to retry only actions that fail strict QA. This is intentionally opt-in because it consumes generation quota.
 
 Package existing sheets without touching the browser:

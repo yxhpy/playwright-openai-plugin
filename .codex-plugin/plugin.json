@@ -1,6 +1,6 @@
 {
   "name": "playwright-openai-plugin",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Installable Codex plugin and local CLI for operating an already logged-in OpenAI/ChatGPT browser session through Playwright.",
   "author": {
     "name": "Local Operator",

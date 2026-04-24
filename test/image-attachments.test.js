@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { classifyImageWaitState, validateImageAttachmentFile } from '../src/images.js';
+import { classifyImageWaitState, resolveBeforeArtifactCountAfterAttachment, validateImageAttachmentFile } from '../src/images.js';
 
 const ONE_PIXEL_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAFhQJ+Wn7zTAAAAABJRU5ErkJggg==',
@@ -98,6 +98,22 @@ test('classifyImageWaitState keeps waiting when no new artifact is available', (
 
   assert.equal(result.completed, false);
   assert.deepEqual(result.diagnostics, []);
+});
+
+test('resolveBeforeArtifactCountAfterAttachment ignores newly visible upload previews', () => {
+  assert.equal(resolveBeforeArtifactCountAfterAttachment({
+    beforeArtifactCount: 1,
+    afterAttachmentArtifactCount: 2,
+    attachmentCount: 1,
+  }), 2);
+});
+
+test('resolveBeforeArtifactCountAfterAttachment keeps original baseline when upload preview is not counted', () => {
+  assert.equal(resolveBeforeArtifactCountAfterAttachment({
+    beforeArtifactCount: 1,
+    afterAttachmentArtifactCount: 1,
+    attachmentCount: 1,
+  }), 1);
 });
 
 async function makeTempDir() {

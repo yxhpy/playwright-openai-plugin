@@ -104,7 +104,7 @@ export async function runImageSubmit(options = {}) {
 
     const model = modelPlan.selection;
 
-    const beforeArtifactCount = await countImageArtifacts(page);
+    let beforeArtifactCount = await countImageArtifacts(page);
     const context = page.context();
     const knownPages = new Set(context.pages());
     if (attachment) {
@@ -125,6 +125,11 @@ export async function runImageSubmit(options = {}) {
           next_step: 'Inspect the visible browser. The reference image may still be uploading or the UI may have drifted.',
         }], 'Inspect the visible browser and retry with a smaller non-sensitive image.');
       }
+      beforeArtifactCount = resolveBeforeArtifactCountAfterAttachment({
+        beforeArtifactCount,
+        afterAttachmentArtifactCount: await countImageArtifacts(page),
+        attachmentCount: 1,
+      });
     }
     await submitPrompt(page);
     const resultPage = await resolvePostSubmitPage(browser, page, knownPages);
@@ -211,7 +216,7 @@ export async function runImageRevise(options = {}) {
       modelPlan.ok = true;
     }
 
-    const beforeArtifactCount = await countImageArtifacts(page);
+    let beforeArtifactCount = await countImageArtifacts(page);
     const context = page.context();
     const knownPages = new Set(context.pages());
     if (attachment) {
@@ -232,6 +237,11 @@ export async function runImageRevise(options = {}) {
           next_step: 'Inspect the visible browser. The reference image may still be uploading or the UI may have drifted.',
         }], 'Inspect the visible browser and retry with a smaller non-sensitive image.');
       }
+      beforeArtifactCount = resolveBeforeArtifactCountAfterAttachment({
+        beforeArtifactCount,
+        afterAttachmentArtifactCount: await countImageArtifacts(page),
+        attachmentCount: 1,
+      });
     }
     await submitPrompt(page);
     const resultPage = await resolvePostSubmitPage(browser, page, knownPages);
@@ -1063,6 +1073,20 @@ export function classifyImageWaitState({ artifactCount, beforeArtifactCount, gen
       next_step: 'Collect the ready artifact. Inspect the visible browser if you expected additional outputs.',
     }],
   };
+}
+
+export function resolveBeforeArtifactCountAfterAttachment({
+  beforeArtifactCount,
+  afterAttachmentArtifactCount,
+  attachmentCount,
+} = {}) {
+  const before = Number(beforeArtifactCount ?? 0);
+  const afterAttachment = Number(afterAttachmentArtifactCount ?? before);
+  const attachments = Number(attachmentCount ?? 0);
+  if (attachments <= 0) {
+    return before;
+  }
+  return Math.max(before, afterAttachment);
 }
 
 async function downloadImageArtifacts(page, candidates, outputDir) {
