@@ -6,3 +6,6 @@ outputs/
 .playwright-openai/
 coverage/
 __pycache__/
+docs/memory/
+tasks/
+PROJECT_GUIDE.md
