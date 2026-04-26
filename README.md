@@ -172,7 +172,9 @@ scripts/csdn-publish.mjs --draft \
   --visibility public
 ```
 
-Use `{{csdn:image:key}}` in Markdown for local body images and pass `--image key=./image.png`. The script imports final Markdown through CSDN's Markdown import flow so headings, lists, code blocks, and uploaded image URLs survive editor conversion. Real publication requires `--publish --confirm-publish "<exact title>"`.
+Use `{{csdn:image:key}}` in Markdown for local body images and pass `--image key=./image.png`. The script imports final Markdown through CSDN's Markdown import flow so headings, lists, code blocks, and uploaded image URLs survive editor conversion. Requested cover, summary, tags, category, article type, source URL, and visibility are read back from the publish dialog; missing confirmations return `ok: false`. Real publication requires `--publish --confirm-publish "<exact title>"`.
+
+For reposted or translated articles, add `--source-url https://example.com/original-article`.
 
 ## GPT Image Prompt Router Skill
 
@@ -247,4 +249,4 @@ The plugin includes:
 
 - `skills/playwright-openai/SKILL.md`, which teaches Codex how to use the CLI safely.
 - `skills/gpt-image-prompt-router/SKILL.md`, which helps Codex find and adapt GPT Image 2 prompt examples before generation.
-- `skills/csdn-publish/SKILL.md`, which teaches Codex how to prepare CSDN drafts with body images, cover, summary, tags, category, article type, and visibility.
+- `skills/csdn-publish/SKILL.md`, which teaches Codex how to prepare CSDN drafts with body images, cover, summary, tags, category, article type, source URL, and visibility.

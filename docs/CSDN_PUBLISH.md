@@ -40,7 +40,7 @@ node scripts/csdn-publish.mjs --inspect
 
 - `--dry-run`: default. Validates local Markdown, image placeholders, cover path, and CSDN-specific formatting rules. It does not touch the browser.
 - `--inspect`: opens or finds the CSDN editor in the CDP browser and reports detected controls.
-- `--draft`: fills the CSDN editor, opens publish settings, uploads cover when provided, and stops before final publish.
+- `--draft`: fills the CSDN editor, opens publish settings, uploads cover when provided, validates requested publish settings from the dialog, and stops before final publish.
 - `--publish`: performs the same work as `--draft`, then clicks the final publish button only when `--confirm-publish` exactly matches `--title`.
 
 ## Article Format Rules
@@ -81,6 +81,19 @@ This avoids publishing local filesystem paths that CSDN cannot render.
 
 Pass `--cover ./cover.png` with `--draft` or `--publish`. The script opens CSDN publish settings and uploads the cover through the image file input it finds after the publish dialog appears. Because CSDN changes its UI frequently, always review the visible browser before using `--publish`.
 
+## Publish Settings
+
+The script supports and verifies these CSDN publish settings when requested:
+
+- `--summary "..."`: article summary, trimmed to CSDN's 256 character limit.
+- `--tags A,B,C` or repeated `--tag A`: up to five article tags.
+- `--category AI编程`: an existing CSDN category/special column.
+- `--article-type original|repost|translated`: article type. Chinese aliases such as `原创`, `转载`, and `翻译` are accepted.
+- `--source-url https://example.com/article`: original source URL for `repost` or `translated` articles.
+- `--visibility public|private|fans|vip`: visible scope. Chinese aliases such as `全部可见`, `仅我可见`, `粉丝可见`, and `VIP可见` are accepted.
+
+If any requested field cannot be confirmed from the visible publish settings dialog, `--draft` returns `ok: false` with a field-specific diagnostic instead of silently continuing.
+
 ## Example
 
 ```bash
@@ -104,6 +117,16 @@ node scripts/csdn-publish.mjs --draft \
   --category AI编程 \
   --article-type original \
   --visibility public
+```
+
+For reposted or translated articles:
+
+```bash
+node scripts/csdn-publish.mjs --draft \
+  --title "转载文章标题" \
+  --markdown-file ./article.md \
+  --article-type repost \
+  --source-url https://example.com/original-article
 ```
 
 Only run `--publish` after visually confirming the draft in the browser, and include an exact title confirmation:

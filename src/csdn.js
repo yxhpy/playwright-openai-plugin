@@ -100,9 +100,20 @@ export async function runCsdnPublish(options = {}) {
     stripTitleHeading: Boolean(options.stripTitleHeading),
   });
   const format = analyzeCsdnMarkdown(prepared.markdown, { title, imageKeys: Object.keys(imageMap) });
+  const sourceUrl = options.sourceUrl ? validateSourceUrl(options.sourceUrl) : null;
 
   if (cover && !cover.ok) {
     diagnostics.push(cover.diagnostic);
+  }
+  if (sourceUrl && !sourceUrl.ok) {
+    diagnostics.push(sourceUrl.diagnostic);
+  }
+  if (requiresSourceUrl(options.articleType) && !sourceUrl) {
+    diagnostics.push({
+      category: 'source_url_required',
+      message: '--source-url is required when --article-type is repost or translated.',
+      next_step: 'Pass the original article URL with --source-url, or use --article-type original.',
+    });
   }
   for (const image of imageFiles) {
     if (!image.ok) {
@@ -190,26 +201,65 @@ export async function runCsdnPublish(options = {}) {
     await fillTitle(page, title);
     const insertedImages = await fillMarkdownWithImageUploads(page, prepared.markdown, imageMap, timeoutMs);
     let publishDialog = null;
+    let publishSettings = null;
+    let settingResults = [];
+    let settingDiagnostics = [];
     if (mode === 'draft' || mode === 'publish') {
       publishDialog = await openPublishDialog(page, timeoutMs);
       if (cover) {
         await uploadCover(page, cover.path, timeoutMs);
       }
       if (options.summary) {
-        await fillSummary(page, options.summary);
+        settingResults.push({ field: 'summary', ok: await fillSummary(page, options.summary), expected: String(options.summary).slice(0, 256) });
       }
       if (options.tags?.length) {
-        await fillTags(page, options.tags);
+        settingResults.push({ field: 'tags', ok: await fillTags(page, options.tags), expected: options.tags.slice(0, 5) });
       }
       if (options.category) {
-        await selectCategory(page, options.category);
+        settingResults.push({ field: 'category', ok: await selectCategory(page, options.category), expected: options.category });
       }
       if (options.articleType) {
-        await selectArticleType(page, options.articleType);
+        const expected = normalizeArticleType(options.articleType);
+        settingResults.push({ field: 'article_type', ok: await selectArticleType(page, options.articleType), expected });
+      }
+      if (sourceUrl?.ok) {
+        settingResults.push({ field: 'source_url', ok: await fillSourceUrl(page, sourceUrl.url), expected: sourceUrl.url });
       }
       if (options.visibility) {
-        await selectVisibility(page, options.visibility);
+        const expected = expectedVisibilityReadValue(options.visibility);
+        settingResults.push({ field: 'visibility', ok: await selectVisibility(page, options.visibility), expected });
       }
+      publishSettings = await readPublishSettings(page);
+      settingDiagnostics = validatePublishSettings({
+        requested: {
+          cover: Boolean(cover),
+          summary: options.summary,
+          tags: options.tags ?? [],
+          category: options.category,
+          articleType: options.articleType,
+          sourceUrl: sourceUrl?.ok ? sourceUrl.url : undefined,
+          visibility: options.visibility,
+        },
+        results: settingResults,
+        settings: publishSettings,
+      });
+    }
+    if (settingDiagnostics.length > 0) {
+      return {
+        ok: false,
+        command: 'csdn publish',
+        mode,
+        ready: false,
+        endpoint,
+        page: await inspectCsdnEditorPage(page),
+        article: articleSummary(title, prepared.markdown, imageMap, cover),
+        inserted_images: insertedImages,
+        publish_dialog_opened: Boolean(publishDialog),
+        publish_settings: publishSettings,
+        setting_results: settingResults,
+        diagnostics: settingDiagnostics,
+        next_step: 'Some requested CSDN publish settings were not confirmed in the visible page. Inspect the browser and update selectors or inputs before publishing.',
+      };
     }
     if (mode === 'publish') {
       await clickFirstVisible(page, FINAL_PUBLISH_SELECTORS, timeoutMs);
@@ -225,7 +275,8 @@ export async function runCsdnPublish(options = {}) {
       article: articleSummary(title, prepared.markdown, imageMap, cover),
       inserted_images: insertedImages,
       publish_dialog_opened: Boolean(publishDialog),
-      publish_settings: await readPublishSettings(page),
+      publish_settings: publishSettings ?? await readPublishSettings(page),
+      setting_results: settingResults,
       final_publish_clicked: mode === 'publish',
       diagnostics: [],
       next_step: mode === 'publish'
@@ -333,6 +384,25 @@ export function parseImageMap(values) {
 
 export function isPublishConfirmed(title, confirmation) {
   return String(confirmation ?? '').trim() === String(title ?? '').trim() && String(title ?? '').trim().length > 0;
+}
+
+export function validateSourceUrl(value) {
+  try {
+    const url = new URL(String(value ?? '').trim());
+    if (!['http:', 'https:'].includes(url.protocol)) {
+      throw new Error('unsupported protocol');
+    }
+    return { ok: true, url: url.toString() };
+  } catch {
+    return {
+      ok: false,
+      diagnostic: {
+        category: 'source_url_invalid',
+        message: '--source-url must be an http or https URL.',
+        next_step: 'Pass a valid original article URL, for example --source-url https://example.com/article.',
+      },
+    };
+  }
 }
 
 export async function inspectCsdnEditorPage(page) {
@@ -539,6 +609,7 @@ async function fillTags(page, tags) {
     await page.waitForTimeout(300);
   }
   await closeTopNestedModal(page);
+  return true;
 }
 
 async function selectCategory(page, category) {
@@ -566,6 +637,20 @@ async function fillSummary(page, summary) {
   const textarea = page.locator('.modal__publish-article textarea.el-textarea__inner').first();
   if (await textarea.count()) {
     await textarea.fill(String(summary).slice(0, 256));
+    return true;
+  }
+  return false;
+}
+
+async function fillSourceUrl(page, sourceUrl) {
+  const input = page.locator([
+    '.modal__publish-article input[placeholder*="原文"]',
+    '.modal__publish-article input[placeholder*="来源"]',
+    '.modal__publish-article input[placeholder*="链接"]',
+    '.modal__publish-article input[placeholder*="转载"]',
+  ].join(', ')).first();
+  if (await input.count()) {
+    await input.fill(sourceUrl);
     return true;
   }
   return false;
@@ -640,6 +725,7 @@ async function readPublishSettings(page) {
     return {
       cover_uploaded: [...modal.querySelectorAll('img')].some((img) => visible(img) && /i-blog\.csdnimg\.cn|img-blog\.csdnimg\.cn/.test(img.src)),
       summary: modal.querySelector('textarea.el-textarea__inner')?.value ?? '',
+      source_url: [...modal.querySelectorAll('input')].find((el) => /原文|来源|链接|转载/.test(el.placeholder || '') && el.value)?.value ?? '',
       tags_text: [...modal.querySelectorAll('.form-entry')].find((el) => /文章标签/.test(el.innerText))?.innerText ?? '',
       category_text: [...modal.querySelectorAll('.form-entry')].find((el) => /分类专栏/.test(el.innerText))?.innerText ?? '',
       article_type: [...modal.querySelectorAll('input[type="radio"]')].find((el) => el.checked && ['original', 'repost', 'translated'].includes(el.value))?.value ?? '',
@@ -854,6 +940,11 @@ function normalizeArticleType(value) {
   }[normalized] ?? null;
 }
 
+function requiresSourceUrl(articleType) {
+  const normalized = normalizeArticleType(articleType);
+  return normalized === 'repost' || normalized === 'translated';
+}
+
 function normalizeVisibility(value) {
   const normalized = String(value ?? '').trim().toLowerCase();
   return {
@@ -871,6 +962,91 @@ function normalizeVisibility(value) {
     VIP可见: 'needvip',
     'vip可见': 'needvip',
   }[normalized] ?? null;
+}
+
+function expectedVisibilityReadValue(value) {
+  const normalized = normalizeVisibility(value);
+  return {
+    public: 'public',
+    private: 'private',
+    needfans: 'read_need_fans',
+    needvip: 'read_need_vip',
+  }[normalized] ?? null;
+}
+
+export function validatePublishSettings({ requested, results, settings }) {
+  const diagnostics = [];
+  if (!settings) {
+    diagnostics.push({
+      category: 'publish_settings_unreadable',
+      message: 'The CSDN publish settings dialog could not be read after filling fields.',
+      next_step: 'Inspect the visible browser and update publish dialog selectors.',
+    });
+    return diagnostics;
+  }
+  for (const result of results) {
+    if (!result.ok) {
+      diagnostics.push({
+        category: `${result.field}_not_filled`,
+        message: `Requested CSDN field ${result.field} could not be filled.`,
+        next_step: 'Inspect the visible browser and update the field selector or requested value.',
+      });
+    }
+  }
+  if (requested.cover && !settings.cover_uploaded) {
+    diagnostics.push({
+      category: 'cover_not_confirmed',
+      message: 'A cover image was requested, but the publish dialog does not show an uploaded CSDN cover.',
+      next_step: 'Inspect the cover upload/crop modal and update cover selectors if needed.',
+    });
+  }
+  if (requested.summary && String(settings.summary ?? '').trim() !== String(requested.summary).slice(0, 256).trim()) {
+    diagnostics.push({
+      category: 'summary_not_confirmed',
+      message: 'The requested summary was not confirmed in CSDN publish settings.',
+      next_step: 'Inspect the summary textarea selector and retry draft mode.',
+    });
+  }
+  for (const tag of requested.tags.slice(0, 5)) {
+    if (!String(settings.tags_text ?? '').includes(tag)) {
+      diagnostics.push({
+        category: 'tag_not_confirmed',
+        message: `The requested tag "${tag}" was not confirmed in CSDN publish settings.`,
+        next_step: 'Inspect the tag picker and retry draft mode.',
+      });
+    }
+  }
+  if (requested.category && !String(settings.category_text ?? '').includes(requested.category)) {
+    diagnostics.push({
+      category: 'category_not_confirmed',
+      message: `The requested category "${requested.category}" was not confirmed in CSDN publish settings.`,
+      next_step: 'Inspect the category picker and retry with an existing CSDN category name.',
+    });
+  }
+  const expectedArticleType = normalizeArticleType(requested.articleType);
+  if (expectedArticleType && settings.article_type !== expectedArticleType) {
+    diagnostics.push({
+      category: 'article_type_not_confirmed',
+      message: `The requested article type "${expectedArticleType}" was not confirmed in CSDN publish settings.`,
+      next_step: 'Inspect the article type radio selectors and retry draft mode.',
+    });
+  }
+  if (requested.sourceUrl && String(settings.source_url ?? '').trim() !== String(requested.sourceUrl).trim()) {
+    diagnostics.push({
+      category: 'source_url_not_confirmed',
+      message: 'The requested source URL was not confirmed in CSDN publish settings.',
+      next_step: 'Inspect the repost/translated source URL input selector and retry draft mode.',
+    });
+  }
+  const expectedVisibility = expectedVisibilityReadValue(requested.visibility);
+  if (expectedVisibility && settings.visibility !== expectedVisibility) {
+    diagnostics.push({
+      category: 'visibility_not_confirmed',
+      message: `The requested visibility "${expectedVisibility}" was not confirmed in CSDN publish settings.`,
+      next_step: 'Inspect the visibility radio selectors and retry draft mode.',
+    });
+  }
+  return diagnostics;
 }
 
 function cssEscape(value) {

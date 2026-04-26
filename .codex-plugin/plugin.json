@@ -1,6 +1,6 @@
 {
   "name": "playwright-openai-plugin",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Installable Codex plugin and local Playwright CLIs for logged-in OpenAI/ChatGPT browser workflows and CSDN publishing.",
   "author": {
     "name": "Local Operator",
@@ -24,7 +24,7 @@
   "interface": {
     "displayName": "Playwright OpenAI",
     "shortDescription": "Control logged-in ChatGPT and CSDN browser workflows from Codex.",
-    "longDescription": "Installable Codex plugin for local Playwright browser automation. It helps Codex inspect, submit, wait, collect, revise, and diagnose ChatGPT web workflows through an already logged-in managed browser session without storing browser credentials. It also includes difficulty-aware ChatGPT image routing, a GPT Image prompt-router skill backed by an attributed offline prompt catalogue, and CSDN Markdown publishing automation for dry-run validation, editor inspection, draft preparation, local image uploads, cover upload, and publish-settings fill.",
+    "longDescription": "Installable Codex plugin for local Playwright browser automation. It helps Codex inspect, submit, wait, collect, revise, and diagnose ChatGPT web workflows through an already logged-in managed browser session without storing browser credentials. It also includes difficulty-aware ChatGPT image routing, a GPT Image prompt-router skill backed by an attributed offline prompt catalogue, and CSDN Markdown publishing automation for dry-run validation, editor inspection, draft preparation, local image uploads, cover upload, publish-settings fill, source URL fill, and readback verification.",
     "developerName": "Local Operator",
     "category": "Productivity",
     "capabilities": [
@@ -40,7 +40,7 @@
       "Generate an image and collect the result.",
       "Find a GPT Image 2 prompt pattern for an image idea.",
       "Check whether an image job can wait, collect, or revise.",
-      "Prepare a CSDN article draft with images, cover, tags, category, and visibility."
+      "Prepare a CSDN article draft with images, cover, tags, category, article type, source URL, and visibility."
     ],
     "brandColor": "#10A37F"
   }

@@ -8,8 +8,8 @@ const HELP = `csdn-publish
 Usage:
   node scripts/csdn-publish.mjs --dry-run --title <title> --markdown-file <file.md> [--image key=path] [--cover path]
   node scripts/csdn-publish.mjs --inspect [--endpoint <cdp-url>] [--ports <list>]
-  node scripts/csdn-publish.mjs --draft --title <title> --markdown-file <file.md> [--image key=path] [--cover path] [--summary <text>] [--tag <tag>] [--category <name>] [--article-type <original|repost|translated>] [--visibility <public|private|fans|vip>]
-  node scripts/csdn-publish.mjs --publish --confirm-publish <exact-title> --title <title> --markdown-file <file.md> [--image key=path] [--cover path] [--summary <text>] [--tag <tag>] [--category <name>] [--article-type <original|repost|translated>] [--visibility <public|private|fans|vip>]
+  node scripts/csdn-publish.mjs --draft --title <title> --markdown-file <file.md> [--image key=path] [--cover path] [--summary <text>] [--tag <tag>] [--category <name>] [--article-type <original|repost|translated>] [--source-url <url>] [--visibility <public|private|fans|vip>]
+  node scripts/csdn-publish.mjs --publish --confirm-publish <exact-title> --title <title> --markdown-file <file.md> [--image key=path] [--cover path] [--summary <text>] [--tag <tag>] [--category <name>] [--article-type <original|repost|translated>] [--source-url <url>] [--visibility <public|private|fans|vip>]
 
 Article image placeholders:
   Write {{csdn:image:hero}} in Markdown, then pass --image hero=/absolute/or/relative/hero.png.
@@ -31,6 +31,7 @@ function parseArgs(argv) {
     category: undefined,
     summary: undefined,
     articleType: undefined,
+    sourceUrl: undefined,
     visibility: undefined,
     endpoint: undefined,
     ports: undefined,
@@ -85,6 +86,9 @@ function parseArgs(argv) {
       i += 1;
     } else if (arg === '--article-type') {
       options.articleType = readValue(argv, i, arg);
+      i += 1;
+    } else if (arg === '--source-url') {
+      options.sourceUrl = readValue(argv, i, arg);
       i += 1;
     } else if (arg === '--visibility') {
       options.visibility = readValue(argv, i, arg);

@@ -13,6 +13,7 @@ Use this skill for publishing or preparing CSDN Markdown articles through the lo
 - Real publication requires both `--publish` and `--confirm-publish "<exact title>"`; do not bypass this confirmation lock.
 - Prefer `--inspect` before mutating the editor when debugging selectors or login state.
 - Prefer `--draft` for end-to-end verification because it fills the editor and publish settings but stops before final publish.
+- Treat `ok: false` setting diagnostics as blockers. If a requested cover, summary, tag, category, article type, source URL, or visibility is not confirmed, fix the selector/input before publishing.
 - Treat browser login state as sensitive user state. Do not print, export, persist, or commit cookies, local storage, auth headers, or full editor session material.
 - Use local image placeholders for body images instead of leaving filesystem paths in Markdown.
 
@@ -91,4 +92,15 @@ plugins/playwright-openai/scripts/csdn-publish --draft \
   --visibility public
 ```
 
-Only use `--publish --confirm-publish "<exact title>"` after a visible-browser review confirms title, body formatting, uploaded body images, cover, summary, tags, category, article type, and visibility are correct.
+For reposted or translated articles, include the original URL:
+
+```bash
+plugins/playwright-openai/scripts/csdn-publish --draft \
+  --endpoint http://127.0.0.1:9333 \
+  --title "转载文章标题" \
+  --markdown-file ./article.md \
+  --article-type repost \
+  --source-url https://example.com/original-article
+```
+
+Only use `--publish --confirm-publish "<exact title>"` after a visible-browser review confirms title, body formatting, uploaded body images, cover, summary, tags, category, article type, source URL when needed, and visibility are correct.

@@ -1,6 +1,6 @@
 {
   "name": "playwright-openai-plugin",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "private": true,
   "description": "Installable Codex plugin and local Playwright CLI for an already logged-in OpenAI browser session.",
   "type": "module",

@@ -5,6 +5,8 @@ import {
   isPublishConfirmed,
   parseImageMap,
   prepareCsdnMarkdown,
+  validatePublishSettings,
+  validateSourceUrl,
 } from '../src/csdn.js';
 
 test('parseImageMap accepts stable placeholder keys', () => {
@@ -59,4 +61,75 @@ test('isPublishConfirmed requires the exact article title', () => {
   assert.equal(isPublishConfirmed('文章标题', ' 文章标题 '), true);
   assert.equal(isPublishConfirmed('文章标题', '其他标题'), false);
   assert.equal(isPublishConfirmed('文章标题', ''), false);
+});
+
+test('validateSourceUrl accepts only http and https URLs', () => {
+  assert.equal(validateSourceUrl('https://example.com/a').ok, true);
+  assert.equal(validateSourceUrl('http://example.com/a').ok, true);
+  assert.equal(validateSourceUrl('ftp://example.com/a').ok, false);
+  assert.equal(validateSourceUrl('not-a-url').ok, false);
+});
+
+test('validatePublishSettings detects missing requested CSDN fields', () => {
+  const diagnostics = validatePublishSettings({
+    requested: {
+      cover: true,
+      summary: '摘要',
+      tags: ['Playwright', 'CSDN'],
+      category: 'AI编程',
+      articleType: 'original',
+      sourceUrl: 'https://example.com/original',
+      visibility: 'fans',
+    },
+    results: [
+      { field: 'category', ok: false },
+    ],
+    settings: {
+      cover_uploaded: false,
+      summary: '',
+      tags_text: '文章标签 Playwright',
+      category_text: '分类专栏',
+      article_type: 'repost',
+      source_url: '',
+      visibility: 'public',
+    },
+  });
+  const categories = diagnostics.map((item) => item.category);
+
+  assert.equal(categories.includes('category_not_filled'), true);
+  assert.equal(categories.includes('cover_not_confirmed'), true);
+  assert.equal(categories.includes('summary_not_confirmed'), true);
+  assert.equal(categories.includes('tag_not_confirmed'), true);
+  assert.equal(categories.includes('category_not_confirmed'), true);
+  assert.equal(categories.includes('article_type_not_confirmed'), true);
+  assert.equal(categories.includes('source_url_not_confirmed'), true);
+  assert.equal(categories.includes('visibility_not_confirmed'), true);
+});
+
+test('validatePublishSettings passes when requested CSDN fields are confirmed', () => {
+  const diagnostics = validatePublishSettings({
+    requested: {
+      cover: true,
+      summary: '摘要',
+      tags: ['Playwright', 'CSDN'],
+      category: 'AI编程',
+      articleType: '原创',
+      sourceUrl: 'https://example.com/original',
+      visibility: '粉丝可见',
+    },
+    results: [
+      { field: 'category', ok: true },
+    ],
+    settings: {
+      cover_uploaded: true,
+      summary: '摘要',
+      tags_text: '文章标签 Playwright CSDN',
+      category_text: '分类专栏 AI编程',
+      article_type: 'original',
+      source_url: 'https://example.com/original',
+      visibility: 'read_need_fans',
+    },
+  });
+
+  assert.deepEqual(diagnostics, []);
 });
