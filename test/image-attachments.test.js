@@ -3,7 +3,12 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
-import { classifyImageWaitState, resolveBeforeArtifactCountAfterAttachment, validateImageAttachmentFile } from '../src/images.js';
+import {
+  classifyImageRevisionReadiness,
+  classifyImageWaitState,
+  resolveBeforeArtifactCountAfterAttachment,
+  validateImageAttachmentFile,
+} from '../src/images.js';
 
 const ONE_PIXEL_PNG = Buffer.from(
   'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADUlEQVR42mP8z8BQDwAFhQJ+Wn7zTAAAAABJRU5ErkJggg==',
@@ -98,6 +103,67 @@ test('classifyImageWaitState keeps waiting when no new artifact is available', (
 
   assert.equal(result.completed, false);
   assert.deepEqual(result.diagnostics, []);
+});
+
+test('classifyImageRevisionReadiness prefers images edit controls for gallery revisions', () => {
+  assert.deepEqual(
+    classifyImageRevisionReadiness({
+      generating: false,
+      canCollect: false,
+      completed: true,
+      surface: 'chatgpt_images',
+      imageEditAvailable: true,
+      imageEditCount: 1,
+    }),
+    {
+      canRevise: true,
+      strategy: 'image_edit_control',
+    },
+  );
+
+  assert.deepEqual(
+    classifyImageRevisionReadiness({
+      generating: false,
+      canCollect: false,
+      completed: true,
+      surface: 'chatgpt_images',
+      imageEditAvailable: false,
+      imageEditCount: 0,
+    }),
+    {
+      canRevise: false,
+      strategy: 'image_edit_unavailable',
+    },
+  );
+
+  assert.deepEqual(
+    classifyImageRevisionReadiness({
+      generating: false,
+      canCollect: false,
+      completed: true,
+      surface: 'chatgpt',
+      imageEditAvailable: false,
+    }),
+    {
+      canRevise: true,
+      strategy: 'conversation_composer',
+    },
+  );
+
+  assert.deepEqual(
+    classifyImageRevisionReadiness({
+      generating: false,
+      canCollect: false,
+      completed: true,
+      surface: 'chatgpt_images',
+      imageEditAvailable: true,
+      imageEditCount: 3,
+    }),
+    {
+      canRevise: false,
+      strategy: 'image_edit_ambiguous',
+    },
+  );
 });
 
 test('resolveBeforeArtifactCountAfterAttachment ignores newly visible upload previews', () => {

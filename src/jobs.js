@@ -13,8 +13,11 @@ export async function createChatJob(data, options = {}) {
     phase: 'submit',
     endpoint: data.endpoint,
     before_assistant_count: data.beforeAssistantCount,
+    before_image_artifact_count: data.beforeImageArtifactCount ?? null,
     attachment_count: data.attachmentCount ?? 0,
+    artifact_count: 0,
     model: sanitizeModel(data.model),
+    tool_modes: sanitizeToolModes(data.toolModes),
     page_url: data.pageUrl,
     created_at: now,
     updated_at: now,
@@ -147,6 +150,7 @@ function summarizeJob(job) {
     artifact_count: job.artifact_count ?? 0,
     output_count: job.output_count ?? 0,
     model: job.model ?? null,
+    tool_modes: job.tool_modes ?? [],
     created_at: job.created_at,
     updated_at: job.updated_at,
     completed_at: job.completed_at ?? null,
@@ -167,6 +171,15 @@ function sanitizeModel(model) {
     routing_difficulty: safeString(model.routing_difficulty),
     requested_thinking_effort: safeString(model.requested_thinking_effort),
   };
+}
+
+function sanitizeToolModes(toolModes) {
+  if (!Array.isArray(toolModes)) {
+    return [];
+  }
+  return toolModes
+    .filter((mode) => typeof mode === 'string' && /^[a-z0-9_-]+$/i.test(mode))
+    .slice(0, 10);
 }
 
 function safeString(value) {

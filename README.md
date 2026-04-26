@@ -4,6 +4,8 @@ Installable Codex plugin plus local Playwright CLIs for operating already logged
 
 - `poai` controls ChatGPT/OpenAI browser workflows.
 - `csdn-publish` prepares CSDN Markdown drafts, uploads local body images, sets the cover, and fills publish settings.
+- `x-articles-publish` validates Markdown, inspects a logged-in X Article composer, fills a visible draft, and requires exact-title confirmation before final publication.
+- `xhs-publish` validates Xiaohongshu note Markdown/media, inspects a logged-in Creator publish page, fills a visible draft, and requires exact-title confirmation before final publication.
 
 This repository is designed to be cloned directly into a Codex plugin directory.
 
@@ -104,6 +106,8 @@ Or install from an existing local checkout:
 ```bash
 scripts/poai --help
 scripts/csdn-publish.mjs --help
+scripts/x-articles-publish.mjs --help
+scripts/xhs-publish.mjs --help
 npm run check
 ```
 
@@ -123,6 +127,16 @@ For CSDN publishing, launch the editor and log in once:
 ```bash
 npm run csdn:launch
 npm run csdn:inspect -- --endpoint http://127.0.0.1:9333
+```
+
+For X Articles or Xiaohongshu publishing, launch the corresponding editor and log in once:
+
+```bash
+npm run x:launch
+npm run x:articles:inspect -- --endpoint http://127.0.0.1:9333
+
+npm run xhs:launch
+npm run xhs:inspect -- --endpoint http://127.0.0.1:9333
 ```
 
 ## Common Commands
@@ -175,6 +189,58 @@ scripts/csdn-publish.mjs --draft \
 Use `{{csdn:image:key}}` in Markdown for local body images and pass `--image key=./image.png`. The script imports final Markdown through CSDN's Markdown import flow so headings, lists, code blocks, and uploaded image URLs survive editor conversion. Requested cover, summary, tags, category, article type, source URL, and visibility are read back from the publish dialog; missing confirmations return `ok: false`. Real publication requires `--publish --confirm-publish "<exact title>"`.
 
 For reposted or translated articles, add `--source-url https://example.com/original-article`.
+
+## X Articles Publish Workflow
+
+Validate Markdown before touching the browser:
+
+```bash
+scripts/x-articles-publish.mjs --dry-run \
+  --title "Article title" \
+  --markdown-file ./article.md \
+  --strip-title-heading
+```
+
+Prepare a visible draft and stop before final publication:
+
+```bash
+scripts/x-articles-publish.mjs --draft \
+  --endpoint http://127.0.0.1:9333 \
+  --title "Article title" \
+  --markdown-file ./article.md \
+  --strip-title-heading \
+  --validate-preview
+```
+
+X Articles automation uses the x.com web editor. The script supports a stable Markdown subset plus standalone local images, native dividers, fenced code, LaTeX blocks, status-URL X post embeds, GIF inserts, and preview validation. Remote Markdown images are blocked; download them locally first or place media manually during visible review. Real publication requires `--publish --confirm-publish "<exact title>"`.
+
+## Xiaohongshu Publish Workflow
+
+Validate note text and local media before touching the browser:
+
+```bash
+scripts/xhs-publish.mjs --dry-run \
+  --title "笔记标题" \
+  --markdown-file ./note.md \
+  --image ./cover.png \
+  --strip-title-heading
+```
+
+Prepare a visible draft and stop before final publication:
+
+```bash
+scripts/xhs-publish.mjs --draft \
+  --endpoint http://127.0.0.1:9333 \
+  --title "笔记标题" \
+  --markdown-file ./note.md \
+  --strip-title-heading \
+  --image ./cover.png \
+  --image ./detail.png \
+  --topic AI工具 \
+  --visibility public
+```
+
+Xiaohongshu automation uses the Creator web editor. The script converts a conservative Markdown subset into note text, uploads local media through file inputs, appends topics, and can set original declaration, content type, visibility, duet/copy permissions, scheduled publish time, best-effort location, and opt-in draft saving. Markdown image syntax is not mapped into the editor; pass display-order media with repeated `--image` flags. Real publication requires `--publish --confirm-publish "<exact title>"`.
 
 ## GPT Image Prompt Router Skill
 

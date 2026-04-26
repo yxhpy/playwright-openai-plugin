@@ -1,11 +1,11 @@
 ---
 name: csdn-publish
-description: Use the repo-local Playwright CSDN publisher to inspect a logged-in CSDN editor session, validate article Markdown, upload local body images, set a cover, fill publish settings, and stop at draft unless explicitly asked to publish.
+description: Use the Playwright CSDN publisher to inspect a logged-in CSDN editor session, validate article Markdown, upload local body images, set a cover, fill publish settings, and stop at draft unless explicitly asked to publish.
 ---
 
 # CSDN Publish
 
-Use this skill for publishing or preparing CSDN Markdown articles through the logged-in managed browser from `/Users/yxhpy/Desktop/project/playwright-openai`.
+Use this skill for publishing or preparing CSDN Markdown articles through the logged-in managed browser from this plugin checkout.
 
 ## Safety Rules
 
@@ -23,12 +23,6 @@ From the repository root:
 
 ```bash
 node scripts/csdn-publish.mjs --help
-```
-
-From the plugin wrapper:
-
-```bash
-plugins/playwright-openai/scripts/csdn-publish --help
 ```
 
 From an installed plugin checkout:
@@ -68,7 +62,7 @@ Example body image:
 Validate inputs without touching the browser:
 
 ```bash
-plugins/playwright-openai/scripts/csdn-publish --dry-run \
+node scripts/csdn-publish.mjs --dry-run \
   --title "文章标题" \
   --markdown-file ./article.md \
   --cover ./cover.png \
@@ -78,7 +72,7 @@ plugins/playwright-openai/scripts/csdn-publish --dry-run \
 Fill the editor and publish settings, then stop before final publish:
 
 ```bash
-plugins/playwright-openai/scripts/csdn-publish --draft \
+node scripts/csdn-publish.mjs --draft \
   --endpoint http://127.0.0.1:9333 \
   --title "文章标题" \
   --markdown-file ./article.md \
@@ -95,7 +89,7 @@ plugins/playwright-openai/scripts/csdn-publish --draft \
 For reposted or translated articles, include the original URL:
 
 ```bash
-plugins/playwright-openai/scripts/csdn-publish --draft \
+node scripts/csdn-publish.mjs --draft \
   --endpoint http://127.0.0.1:9333 \
   --title "转载文章标题" \
   --markdown-file ./article.md \

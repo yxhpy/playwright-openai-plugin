@@ -74,6 +74,58 @@ test('buildDiscoveryCapabilities exposes chat and file candidates only when app-
   );
 });
 
+test('buildDiscoveryCapabilities exposes app-ready advanced ChatGPT controls', () => {
+  assert.deepEqual(
+    buildDiscoveryCapabilities(
+      'chatgpt',
+      'app_ready',
+      presentSignals(
+        'model_selector',
+        'web_search_control',
+        'deep_research_control',
+        'image_creation_control',
+        'temporary_chat_control',
+      ),
+    ),
+    [
+      {
+        name: 'model_selection_candidate',
+        status: 'available',
+        evidence: 'model_selector',
+      },
+      {
+        name: 'web_search_candidate',
+        status: 'available',
+        evidence: 'web_search_control',
+      },
+      {
+        name: 'deep_research_candidate',
+        status: 'available',
+        evidence: 'deep_research_control',
+      },
+      {
+        name: 'image_creation_candidate',
+        status: 'available',
+        evidence: 'image_creation_control',
+      },
+      {
+        name: 'temporary_chat_candidate',
+        status: 'available',
+        evidence: 'temporary_chat_control',
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    buildDiscoveryCapabilities(
+      'chatgpt',
+      'login_required',
+      presentSignals('model_selector', 'web_search_control', 'deep_research_control'),
+    ),
+    [],
+  );
+});
+
 test('buildDiscoveryCapabilities reports images surface candidates from safe image signals', () => {
   assert.deepEqual(
     buildDiscoveryCapabilities('chatgpt_images', 'app_ready', presentSignals('new_chat_control')),
@@ -93,6 +145,27 @@ test('buildDiscoveryCapabilities reports images surface candidates from safe ima
         name: 'images_surface_candidate',
         status: 'available',
         evidence: 'images_link',
+      },
+    ],
+  );
+
+  assert.deepEqual(
+    buildDiscoveryCapabilities('chatgpt_images', 'app_ready', presentSignals('image_edit_control', 'image_share_control')),
+    [
+      {
+        name: 'images_surface_candidate',
+        status: 'available',
+        evidence: 'current_url',
+      },
+      {
+        name: 'image_edit_candidate',
+        status: 'available',
+        evidence: 'image_edit_control',
+      },
+      {
+        name: 'image_share_candidate',
+        status: 'available',
+        evidence: 'image_share_control',
       },
     ],
   );

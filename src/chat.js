@@ -24,6 +24,36 @@ const STOP_SELECTORS = [
   'button[aria-label*="Stop"]',
   'button[aria-label*="停止"]',
 ];
+const TEMPORARY_CHAT_SELECTORS = [
+  'button[aria-label="开启临时聊天"]',
+  'button[aria-label*="temporary chat" i]',
+];
+const COMPOSER_PLUS_SELECTORS = [
+  'button[data-testid="composer-plus-btn"]',
+  'button[aria-label="添加文件等"]',
+  'button[aria-label*="Attach" i]',
+  'button[aria-label*="Add" i]',
+];
+const CHAT_TOOL_MODE_DEFINITIONS = [
+  {
+    name: 'web_search',
+    option: 'webSearch',
+    labels: ['网页搜索', 'Web search'],
+    menuSignal: /网页搜索|Web search/i,
+  },
+  {
+    name: 'deep_research',
+    option: 'deepResearch',
+    labels: ['深度研究', 'Deep research'],
+    menuSignal: /深度研究|Deep research/i,
+  },
+  {
+    name: 'create_image',
+    option: 'createImage',
+    labels: ['创建图片', 'Create image'],
+    menuSignal: /创建图片|Create image/i,
+  },
+];
 
 export async function runChatSend(options = {}) {
   const prompt = String(options.prompt ?? '').trim();
@@ -61,11 +91,21 @@ export async function runChatSend(options = {}) {
       return failureResult('model', endpoint, [model.diagnostic], 'Select a suitable chat model in the managed browser or retry with `--model <label>`.');
     }
 
+    const toolModes = normalizeChatToolModes(options);
+    const toolModeResult = await applyChatToolModes(page, toolModes);
+    if (!toolModeResult.ok) {
+      return failureResult('tool_mode', endpoint, [toolModeResult.diagnostic], 'Run `poai discover --json` and confirm the requested ChatGPT tool mode is available.');
+    }
+
     const beforeAssistantCount = await countAssistantMessages(page);
+    const beforeImageArtifactCount = await countGeneratedImageArtifacts(page);
     const composer = await firstVisibleLocator(page, COMPOSER_SELECTOR);
     await fillComposer(page, composer, prompt);
     await submitPrompt(page);
-    const response = await waitForLatestAssistant(page, beforeAssistantCount, timeoutMs);
+    const response = await waitForLatestAssistant(page, beforeAssistantCount, timeoutMs, {
+      beforeImageArtifactCount,
+      toolModes: toolModeResult.enabled,
+    });
 
     return {
       ok: true,
@@ -75,6 +115,8 @@ export async function runChatSend(options = {}) {
       submitted: true,
       completed: response.completed,
       model,
+      tool_modes: toolModeResult.enabled,
+      image_artifact_count: response.imageArtifactCount,
       response: response.text ? { text: response.text } : null,
       diagnostics: response.diagnostics,
       next_step: response.completed
@@ -126,7 +168,14 @@ export async function runChatSubmit(options = {}) {
       return chatJobFailureResult('chat submit', 'model', null, endpoint, [model.diagnostic], 'Select a suitable chat model in the managed browser or retry with `--model <label>`.');
     }
 
+    const toolModes = normalizeChatToolModes(options);
+    const toolModeResult = await applyChatToolModes(page, toolModes);
+    if (!toolModeResult.ok) {
+      return chatJobFailureResult('chat submit', 'tool_mode', null, endpoint, [toolModeResult.diagnostic], 'Run `poai discover --json` and confirm the requested ChatGPT tool mode is available.');
+    }
+
     const beforeAssistantCount = await countAssistantMessages(page);
+    const beforeImageArtifactCount = await countGeneratedImageArtifacts(page);
     if (attachment) {
       const attachResult = await attachFileToComposer(page, attachment.path);
       if (!attachResult.attached) {
@@ -150,8 +199,10 @@ export async function runChatSubmit(options = {}) {
     const job = await createChatJob({
       endpoint,
       beforeAssistantCount,
+      beforeImageArtifactCount,
       attachmentCount: attachment ? 1 : 0,
       model,
+      toolModes: toolModeResult.enabled,
       pageUrl: sanitizeUrl(page.url()),
     }, options);
 
@@ -165,6 +216,7 @@ export async function runChatSubmit(options = {}) {
       completed: false,
       attachment_count: attachment ? 1 : 0,
       model: job.model,
+      tool_modes: job.tool_modes,
       diagnostics: [],
       next_step: `Run \`poai chat wait --job-id ${job.id}\`, then \`poai chat collect --job-id ${job.id}\`.`,
     };
@@ -192,11 +244,15 @@ export async function runChatWait(options = {}) {
       }], 'Open the submitted conversation in the managed browser and retry wait.');
     }
 
-    const response = await waitForLatestAssistant(page, job.before_assistant_count, timeoutMs);
+    const response = await waitForLatestAssistant(page, job.before_assistant_count, timeoutMs, {
+      beforeImageArtifactCount: job.before_image_artifact_count,
+      toolModes: job.tool_modes,
+    });
     await updateJob(job.id, {
       status: response.completed ? 'completed' : 'timeout',
       phase: response.completed ? 'wait_complete' : 'wait_timeout',
       completed_at: response.completed ? new Date().toISOString() : job.completed_at,
+      artifact_count: response.imageArtifactCount ?? job.artifact_count ?? 0,
     }, options);
 
     return {
@@ -207,6 +263,7 @@ export async function runChatWait(options = {}) {
       job_id: job.id,
       submitted: true,
       completed: response.completed,
+      image_artifact_count: response.imageArtifactCount,
       diagnostics: response.diagnostics,
       next_step: response.completed
         ? `Run \`poai chat collect --job-id ${job.id}\` to retrieve the latest assistant response.`
@@ -235,8 +292,12 @@ export async function runChatCollect(options = {}) {
       }], 'Open the submitted conversation in the managed browser and retry collect.');
     }
 
-    const count = await countAssistantMessages(page);
-    if (count <= job.before_assistant_count) {
+    const response = await readLatestChatResponseState(page, {
+      beforeAssistantCount: job.before_assistant_count,
+      beforeImageArtifactCount: job.before_image_artifact_count,
+      toolModes: job.tool_modes,
+    });
+    if (!response.completed) {
       return chatJobFailureResult('chat collect', 'collect', job.id, endpoint, [{
         category: 'late_result_possible',
         message: 'No new assistant response was found for this job yet.',
@@ -244,11 +305,11 @@ export async function runChatCollect(options = {}) {
       }], `Run \`poai chat wait --job-id ${job.id}\` and retry collect.`);
     }
 
-    const text = await readLatestAssistantText(page);
     await updateJob(job.id, {
       status: 'collected',
       phase: 'collect',
       collected_at: new Date().toISOString(),
+      artifact_count: response.imageArtifactCount ?? job.artifact_count ?? 0,
     }, options);
 
     return {
@@ -259,7 +320,8 @@ export async function runChatCollect(options = {}) {
       job_id: job.id,
       submitted: true,
       completed: true,
-      response: text ? { text } : null,
+      image_artifact_count: response.imageArtifactCount,
+      response: response.text ? { text: response.text } : null,
       diagnostics: [],
       next_step: 'Latest assistant response collected. Job metadata does not store the response text.',
     };
@@ -304,6 +366,69 @@ export async function runChatJobsCleanup(options = {}) {
       ? 'Dry run only. Add `--yes` to delete these job metadata files.'
       : 'Selected job metadata files deleted.',
   };
+}
+
+export async function runChatToolsInspect(options = {}) {
+  const endpointResult = await connectFirstAvailable(buildCandidateEndpoints(options), options);
+  if (!endpointResult.browser) {
+    return {
+      ok: true,
+      command: 'chat tools inspect',
+      endpoint: endpointResult.endpoint,
+      ready: false,
+      tool_modes: [],
+      diagnostics: endpointResult.diagnostics,
+      next_step: 'Run `poai browser launch`, then rerun `poai chat tools inspect --json`.',
+    };
+  }
+
+  const { browser, endpoint } = endpointResult;
+  try {
+    const page = await findChatPage(browser);
+    if (!page) {
+      return {
+        ok: true,
+        command: 'chat tools inspect',
+        endpoint,
+        ready: false,
+        tool_modes: [],
+        diagnostics: [{
+          category: 'unsupported_capability',
+          message: 'No ChatGPT page was found in the connected browser.',
+          next_step: 'Open ChatGPT in the managed browser and retry.',
+        }],
+        next_step: 'Open ChatGPT in the managed browser and retry.',
+      };
+    }
+
+    const readiness = await checkReadiness(page);
+    if (!readiness.ready) {
+      return {
+        ok: true,
+        command: 'chat tools inspect',
+        endpoint,
+        ready: false,
+        tool_modes: [],
+        diagnostics: readiness.diagnostics,
+        next_step: 'Complete login and rerun `poai chat tools inspect --json`.',
+      };
+    }
+
+    const inspection = await inspectChatToolModes(page);
+    return {
+      ok: true,
+      command: 'chat tools inspect',
+      endpoint,
+      ready: true,
+      tool_modes: inspection.toolModes,
+      diagnostics: inspection.diagnostics,
+      next_step: inspection.toolModes.some((mode) => mode.status === 'available')
+        ? 'Use the corresponding `poai chat submit` flag, such as `--web-search`, before submitting.'
+        : 'No supported ChatGPT tool modes were detected. Run `poai discover --json` and inspect UI drift.',
+    };
+  } finally {
+    await browser.close();
+  }
 }
 
 export async function validateAttachmentFile(filePath) {
@@ -351,6 +476,55 @@ export async function validateAttachmentFile(filePath) {
     path: resolvedPath,
     attachmentCount: 1,
   };
+}
+
+export function normalizeChatToolModes(options = {}) {
+  const modes = [];
+  if (options.webSearch) {
+    modes.push('web_search');
+  }
+  if (options.deepResearch) {
+    modes.push('deep_research');
+  }
+  if (options.temporary) {
+    modes.push('temporary');
+  }
+  if (options.createImage) {
+    modes.push('create_image');
+  }
+  return modes;
+}
+
+export function buildChatToolModeAvailability({ temporaryPresent = false, menuText = '', composerPlusPresent = false } = {}) {
+  const availability = [{
+    name: 'temporary',
+    flag: '--temporary',
+    status: temporaryPresent ? 'available' : 'unavailable',
+    evidence: temporaryPresent ? 'temporary_chat_control' : null,
+    unavailable_reason: temporaryPresent ? null : 'temporary_chat_control_missing',
+  }];
+
+  for (const definition of CHAT_TOOL_MODE_DEFINITIONS) {
+    const present = composerPlusPresent && definition.menuSignal.test(menuText);
+    availability.push({
+      name: definition.name,
+      flag: `--${definition.name.replace(/_/g, '-')}`,
+      status: present ? 'available' : 'unavailable',
+      evidence: present ? 'composer_plus_menu' : null,
+      unavailable_reason: present ? null : unavailableToolModeReason({ composerPlusPresent, menuText }),
+    });
+  }
+  return availability;
+}
+
+function unavailableToolModeReason({ composerPlusPresent, menuText }) {
+  if (!composerPlusPresent) {
+    return 'composer_plus_unavailable';
+  }
+  if (!menuText) {
+    return 'composer_plus_menu_empty';
+  }
+  return 'menu_item_missing';
 }
 
 async function connectFirstAvailable(endpoints, options) {
@@ -440,6 +614,207 @@ async function attachFileToComposer(page, filePath) {
   }
 }
 
+async function applyChatToolModes(page, modes) {
+  if (!modes.length) {
+    return { ok: true, enabled: [] };
+  }
+
+  const inspection = await inspectChatToolModes(page);
+  const unavailable = modes.find((mode) => !isChatToolModeAvailable(inspection.toolModes, mode));
+  if (unavailable) {
+    return {
+      ok: false,
+      diagnostic: {
+        category: 'tool_mode_unavailable',
+        message: `Requested ChatGPT tool mode is not available: ${unavailable}`,
+        available_modes: inspection.toolModes
+          .filter((mode) => mode.status === 'available')
+          .map((mode) => mode.name),
+        next_step: 'Run `poai chat tools inspect --json` or `poai discover --json` and retry with an available tool-mode flag.',
+      },
+    };
+  }
+
+  const enabled = [];
+  if (modes.includes('temporary')) {
+    const temporary = await enableTemporaryChat(page);
+    if (!temporary.ok) {
+      return temporary;
+    }
+    enabled.push('temporary');
+  }
+
+  const plusModes = modes.filter((mode) => mode !== 'temporary');
+  for (const mode of plusModes) {
+    const result = await selectComposerToolMode(page, mode);
+    if (!result.ok) {
+      return result;
+    }
+    enabled.push(mode);
+  }
+  await page.keyboard.press('Escape').catch(() => {});
+  return { ok: true, enabled };
+}
+
+async function inspectChatToolModes(page) {
+  const temporary = await firstVisibleFromSelectors(page, TEMPORARY_CHAT_SELECTORS);
+  const composerPlus = await firstVisibleFromSelectors(page, COMPOSER_PLUS_SELECTORS);
+  let menuText = '';
+  const diagnostics = [];
+  if (composerPlus) {
+    menuText = await readComposerPlusMenuText(page, composerPlus);
+  } else {
+    diagnostics.push({
+      category: 'tool_mode_unavailable',
+      message: 'Composer plus menu was not found.',
+      next_step: 'Run `poai discover --json` and confirm `composer_plus_control` is available.',
+    });
+  }
+  await page.keyboard.press('Escape').catch(() => {});
+  return {
+    toolModes: buildChatToolModeAvailability({
+      temporaryPresent: Boolean(temporary),
+      composerPlusPresent: Boolean(composerPlus),
+      menuText,
+    }),
+    diagnostics,
+  };
+}
+
+function isChatToolModeAvailable(toolModes, name) {
+  return toolModes.some((mode) => mode.name === name && mode.status === 'available');
+}
+
+async function enableTemporaryChat(page) {
+  const button = await firstVisibleFromSelectors(page, TEMPORARY_CHAT_SELECTORS);
+  if (!button) {
+    return {
+      ok: false,
+      diagnostic: {
+        category: 'tool_mode_unavailable',
+        message: 'Temporary chat control was not found.',
+        next_step: 'Run `poai discover --json` and confirm `temporary_chat_candidate` is available.',
+      },
+    };
+  }
+  const pressed = await button.getAttribute('aria-pressed').catch(() => null);
+  if (pressed === 'true') {
+    return { ok: true };
+  }
+  await button.click({ timeout: 5000 });
+  await page.waitForTimeout(300);
+  return { ok: true };
+}
+
+async function selectComposerToolMode(page, mode) {
+  const definition = CHAT_TOOL_MODE_DEFINITIONS.find((item) => item.name === mode);
+  if (!definition) {
+    return {
+      ok: false,
+      diagnostic: {
+        category: 'tool_mode_unsupported',
+        message: `Unsupported chat tool mode: ${mode}`,
+        next_step: 'Use --web-search, --deep-research, --temporary, or --create-image.',
+      },
+    };
+  }
+
+  const opener = await firstVisibleFromSelectors(page, COMPOSER_PLUS_SELECTORS);
+  if (!opener) {
+    return {
+      ok: false,
+      diagnostic: {
+        category: 'tool_mode_unavailable',
+        message: 'Composer plus menu was not found.',
+        next_step: 'Run `poai discover --json` and confirm `composer_plus_control` is available.',
+      },
+    };
+  }
+
+  await page.keyboard.press('Escape').catch(() => {});
+  await opener.click({ timeout: 5000 }).catch(async () => {
+    await opener.evaluate((element) => element.click()).catch(() => {});
+  });
+  await page.waitForTimeout(300);
+  const menuText = await readVisibleMenuText(page);
+  if (!definition.menuSignal.test(menuText)) {
+    await page.keyboard.press('Escape').catch(() => {});
+    return {
+      ok: false,
+      diagnostic: {
+        category: 'tool_mode_unavailable',
+        message: `Requested ChatGPT tool mode is not visible: ${mode}`,
+        next_step: 'Run `poai discover --json` and confirm the requested capability is present.',
+      },
+    };
+  }
+
+  const option = await firstVisibleToolModeOption(page, definition.labels);
+  if (!option) {
+    await page.keyboard.press('Escape').catch(() => {});
+    return {
+      ok: false,
+      diagnostic: {
+        category: 'tool_mode_unavailable',
+        message: `Requested ChatGPT tool mode could not be selected: ${mode}`,
+        next_step: 'Inspect the visible browser. The ChatGPT menu may have changed.',
+      },
+    };
+  }
+  await option.click({ timeout: 5000 });
+  await page.waitForTimeout(300);
+  return { ok: true };
+}
+
+async function readComposerPlusMenuText(page, opener) {
+  await page.keyboard.press('Escape').catch(() => {});
+  await opener.click({ timeout: 5000 }).catch(async () => {
+    await opener.evaluate((element) => element.click()).catch(() => {});
+  });
+  await page.waitForTimeout(300);
+  const menuText = await readVisibleMenuText(page);
+  await page.keyboard.press('Escape').catch(() => {});
+  return menuText;
+}
+
+async function firstVisibleToolModeOption(page, labels) {
+  for (const label of labels) {
+    const exact = page.getByRole('menuitemradio', { name: new RegExp(`^${escapeRegex(label)}$`, 'i') }).first();
+    if ((await exact.count().catch(() => 0)) > 0 && await exact.isVisible().catch(() => false)) {
+      return exact;
+    }
+    const menuItem = page.getByRole('menuitem', { name: new RegExp(escapeRegex(label), 'i') }).first();
+    if ((await menuItem.count().catch(() => 0)) > 0 && await menuItem.isVisible().catch(() => false)) {
+      return menuItem;
+    }
+    const text = page.locator('[role="menuitemradio"], [role="menuitem"]')
+      .filter({ hasText: new RegExp(escapeRegex(label), 'i') })
+      .first();
+    if ((await text.count().catch(() => 0)) > 0 && await text.isVisible().catch(() => false)) {
+      return text;
+    }
+  }
+  return null;
+}
+
+async function readVisibleMenuText(page) {
+  return page.evaluate(() => {
+    const isVisible = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    return [
+      ...document.querySelectorAll('[role="menu"], [role="listbox"], [data-radix-menu-content], [data-radix-popper-content-wrapper]'),
+    ]
+      .filter(isVisible)
+      .map((element) => element.innerText || element.textContent || '')
+      .join('\n')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }).catch(() => '');
+}
+
 async function checkReadiness(page) {
   const loginPresent = await isPresent(page, LOGIN_SELECTOR);
   const composer = await firstVisibleLocator(page, COMPOSER_SELECTOR);
@@ -520,27 +895,74 @@ async function submitPrompt(page) {
   }
 }
 
-async function waitForLatestAssistant(page, beforeAssistantCount, timeoutMs) {
+async function waitForLatestAssistant(page, beforeAssistantCount, timeoutMs, options = {}) {
   const deadline = Date.now() + timeoutMs;
-  let latestText = '';
+  let latestState = {
+    completed: false,
+    text: '',
+    imageArtifactCount: 0,
+    diagnostics: [],
+  };
   while (Date.now() < deadline) {
-    const count = await countAssistantMessages(page);
-    if (count > beforeAssistantCount) {
-      latestText = await readLatestAssistantText(page);
-      if (latestText && !(await isGenerating(page))) {
-        return { completed: true, text: latestText, diagnostics: [] };
-      }
+    latestState = await readLatestChatResponseState(page, {
+      ...options,
+      beforeAssistantCount,
+    });
+    if (latestState.completed) {
+      return latestState;
     }
     await sleep(500);
   }
   return {
     completed: false,
-    text: latestText,
+    text: latestState.text,
+    imageArtifactCount: latestState.imageArtifactCount,
     diagnostics: [{
       category: 'timeout',
       message: 'Timed out waiting for the latest assistant response to finish.',
       next_step: 'Inspect the visible browser. The response may still complete later.',
     }],
+  };
+}
+
+async function readLatestChatResponseState(page, options = {}) {
+  const assistantCount = await countAssistantMessages(page);
+  const latestText = assistantCount > Number(options.beforeAssistantCount ?? 0)
+    ? await readLatestAssistantText(page)
+    : '';
+  const imageArtifactCount = await countGeneratedImageArtifacts(page);
+  const generating = await isGenerating(page);
+  return evaluateLatestChatResponseState({
+    ...options,
+    assistantCount,
+    latestText,
+    imageArtifactCount,
+    generating,
+  });
+}
+
+export function evaluateLatestChatResponseState({
+  beforeAssistantCount = 0,
+  assistantCount = 0,
+  latestText = '',
+  beforeImageArtifactCount,
+  imageArtifactCount = 0,
+  generating = false,
+  toolModes = [],
+} = {}) {
+  const text = String(latestText ?? '').trim();
+  const assistantAdvanced = Number(assistantCount ?? 0) > Number(beforeAssistantCount ?? 0);
+  const hasCreateImageMode = Array.isArray(toolModes) && toolModes.includes('create_image');
+  const imageBaseline = Number.isInteger(beforeImageArtifactCount)
+    ? beforeImageArtifactCount
+    : (hasCreateImageMode ? 0 : Number(imageArtifactCount ?? 0));
+  const imageAdvanced = Number(imageArtifactCount ?? 0) > imageBaseline;
+
+  return {
+    completed: !generating && ((assistantAdvanced && Boolean(text)) || imageAdvanced),
+    text,
+    imageArtifactCount: Number(imageArtifactCount ?? 0),
+    diagnostics: [],
   };
 }
 
@@ -555,6 +977,35 @@ async function readLatestAssistantText(page) {
 
 async function countAssistantMessages(page) {
   return page.locator(ASSISTANT_SELECTOR).count().catch(() => 0);
+}
+
+async function countGeneratedImageArtifacts(page) {
+  return page.evaluate(() => {
+    function isVisible(element) {
+      const style = window.getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) {
+        return false;
+      }
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    }
+
+    const editButtons = [...document.querySelectorAll('main button, main [role="button"]')]
+      .filter((element) => {
+        const label = `${element.getAttribute('aria-label') || ''} ${element.textContent || ''}`.trim();
+        return /编辑图片|Edit image/i.test(label) && isVisible(element);
+      });
+    if (editButtons.length > 0) {
+      return editButtons.length;
+    }
+
+    return [...document.querySelectorAll('main img')]
+      .filter((image) => {
+        const label = image.getAttribute('alt') || '';
+        return /已生成图片|Generated image/i.test(label) && isVisible(image);
+      })
+      .length;
+  }).catch(() => 0);
 }
 
 async function isGenerating(page) {
@@ -578,8 +1029,22 @@ async function firstVisibleLocator(page, selector) {
   return null;
 }
 
+async function firstVisibleFromSelectors(page, selectors) {
+  for (const selector of selectors) {
+    const locator = await firstVisibleLocator(page, selector);
+    if (locator) {
+      return locator;
+    }
+  }
+  return null;
+}
+
 async function isPresent(page, selector) {
   return (await page.locator(selector).count().catch(() => 0)) > 0;
+}
+
+function escapeRegex(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function failureResult(phase, endpoint, diagnostics, nextStep) {

@@ -1,13 +1,15 @@
 {
   "name": "playwright-openai-plugin",
-  "version": "0.3.5",
+  "version": "0.3.6",
   "private": true,
-  "description": "Installable Codex plugin and local Playwright CLIs for logged-in OpenAI and CSDN browser workflows.",
+  "description": "Installable Codex plugin and local Playwright CLIs for logged-in OpenAI, CSDN, X Articles, and Xiaohongshu browser workflows.",
   "type": "module",
   "bin": {
     "playwright-openai": "./src/cli.js",
     "poai": "./src/cli.js",
-    "csdn-publish": "./scripts/csdn-publish.mjs"
+    "csdn-publish": "./scripts/csdn-publish.mjs",
+    "x-articles-publish": "./scripts/x-articles-publish.mjs",
+    "xhs-publish": "./scripts/xhs-publish.mjs"
   },
   "scripts": {
     "status": "node src/cli.js status",
@@ -15,8 +17,17 @@
     "csdn:inspect": "node scripts/csdn-publish.mjs --inspect",
     "csdn:dry-run": "node scripts/csdn-publish.mjs --dry-run",
     "csdn:draft": "node scripts/csdn-publish.mjs --draft",
+    "x:launch": "node src/cli.js browser launch --url https://x.com/compose/articles",
+    "x:articles:inspect": "node scripts/x-articles-publish.mjs --inspect",
+    "x:articles:capabilities": "node scripts/x-articles-publish.mjs --capabilities",
+    "x:articles:dry-run": "node scripts/x-articles-publish.mjs --dry-run",
+    "x:articles:draft": "node scripts/x-articles-publish.mjs --draft",
+    "xhs:launch": "node src/cli.js browser launch --url https://creator.xiaohongshu.com/publish/publish?source=official",
+    "xhs:inspect": "node scripts/xhs-publish.mjs --inspect",
+    "xhs:dry-run": "node scripts/xhs-publish.mjs --dry-run",
+    "xhs:draft": "node scripts/xhs-publish.mjs --draft",
     "test": "node --test",
-    "check": "node --check src/cli.js && node --check src/status.js && node --check src/cdp.js && node --check src/output.js && node --check src/browser.js && node --check src/paths.js && node --check src/discover.js && node --check src/model.js && node --check src/chat.js && node --check src/images.js && node --check src/action-pack.js && node --check src/jobs.js && node --check src/csdn.js && node --check scripts/csdn-publish.mjs && npm test"
+    "check": "node --check src/cli.js && node --check src/status.js && node --check src/cdp.js && node --check src/output.js && node --check src/browser.js && node --check src/paths.js && node --check src/discover.js && node --check src/model.js && node --check src/chat.js && node --check src/images.js && node --check src/action-pack.js && node --check src/jobs.js && node --check src/csdn.js && node --check src/x-articles.js && node --check src/xhs.js && node --check scripts/csdn-publish.mjs && node --check scripts/x-articles-publish.mjs && node --check scripts/xhs-publish.mjs && npm test"
   },
   "dependencies": {
     "fflate": "^0.8.2",

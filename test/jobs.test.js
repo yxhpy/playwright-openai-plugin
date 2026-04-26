@@ -26,6 +26,7 @@ test('createChatJob stores only non-secret metadata', async () => {
         selected_testid: 'model-switcher-gpt-5-4-pro',
         strategy: 'auto_priority',
       },
+      toolModes: ['web_search', 'deep_research', 'unsafe mode', '../../bad'],
       pageUrl: 'https://chatgpt.com/c/[redacted]',
       prompt: 'NEVER_PERSIST_PROMPT',
       response: 'NEVER_PERSIST_RESPONSE',
@@ -44,6 +45,8 @@ test('createChatJob stores only non-secret metadata', async () => {
     assert.equal(stored.before_assistant_count, 2);
     assert.equal(stored.attachment_count, 1);
     assert.equal(stored.model.selected_testid, 'model-switcher-gpt-5-4-pro');
+    assert.deepEqual(stored.tool_modes, ['web_search', 'deep_research']);
+    assert.deepEqual((await listJobs({ jobsDir }))[0].tool_modes, ['web_search', 'deep_research']);
     assert.equal(stored.page_url, 'https://chatgpt.com/c/[redacted]');
     assert.equal(stored.prompt, undefined);
     assert.equal(stored.response, undefined);

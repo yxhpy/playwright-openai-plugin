@@ -40,6 +40,11 @@ const GENERATING_HINT_SELECTORS = [
   'button[aria-label*="Creating" i]',
   'text=/思考中|正在生成|生成中|Generating|Creating/i',
 ];
+const IMAGE_EDIT_SELECTORS = [
+  'button[aria-label="编辑图片"]',
+  'button[aria-label*="Edit image" i]',
+  'button:has-text("编辑")',
+];
 
 export async function runImageSend(options = {}) {
   const submit = await runImageSubmit(options);
@@ -194,6 +199,10 @@ export async function runImageRevise(options = {}) {
         next_step: 'Open the parent conversation in the managed browser, then retry `poai image revise`.',
       }], 'Open the parent conversation in the managed browser, then retry `poai image revise`.');
     }
+    const revisionPrep = await prepareImageRevisionPage(page, parentJob);
+    if (!revisionPrep.ok) {
+      return imageFailureResult('image revise', 'ready', parentJob.id, endpoint, [revisionPrep.diagnostic], revisionPrep.diagnostic.next_step);
+    }
     const readiness = await checkImageReadiness(page);
     if (!readiness.ready) {
       return imageFailureResult('image revise', 'ready', parentJob.id, endpoint, readiness.diagnostics, 'Open the parent image conversation in the managed browser and retry.');
@@ -269,6 +278,7 @@ export async function runImageRevise(options = {}) {
       attachment_count: attachment ? 1 : 0,
       artifact_count: 0,
       model: job.model,
+      revision_strategy: revisionPrep.strategy,
       diagnostics: [],
       next_step: `Run \`poai image wait --job-id ${job.id}\`, then \`poai image collect --job-id ${job.id}\`.`,
     };
@@ -509,7 +519,16 @@ export async function runImageInspect(options = {}) {
     const uncollectedArtifactCount = Math.max(0, newArtifactCount - Number(job.output_count ?? 0));
     const canCollect = uncollectedArtifactCount > 0;
     const canWait = !canCollect && !isCompletedJob(job);
-    const canRevise = !generating && (canCollect || isCompletedJob(job));
+    const imageEditCount = await countVisibleImageEditControls(located.page);
+    const imageEditAvailable = imageEditCount > 0;
+    const revision = classifyImageRevisionReadiness({
+      generating,
+      canCollect,
+      completed: isCompletedJob(job),
+      surface: classifyOpenaiSurface(located.page.url()),
+      imageEditAvailable,
+      imageEditCount,
+    });
 
     return {
       ok: true,
@@ -533,10 +552,21 @@ export async function runImageInspect(options = {}) {
       generating,
       can_wait: canWait,
       can_collect: canCollect,
-      can_revise: canRevise,
+      can_revise: revision.canRevise,
+      revision_strategy: revision.strategy,
+      image_edit_available: imageEditAvailable,
+      image_edit_count: imageEditCount,
       model: job.model ?? null,
-      diagnostics: buildInspectDiagnostics({ located, job, rawGenerating, generating, canCollect, canRevise }),
-      next_step: chooseInspectNextStep({ job, generating, canCollect, canWait, canRevise }),
+      diagnostics: buildInspectDiagnostics({
+        located,
+        job,
+        rawGenerating,
+        generating,
+        canCollect,
+        canRevise: revision.canRevise,
+        revisionStrategy: revision.strategy,
+      }),
+      next_step: chooseInspectNextStep({ job, generating, canCollect, canWait, canRevise: revision.canRevise }),
     };
   } finally {
     await browser.close();
@@ -841,7 +871,7 @@ async function findImageRevisionPage(browser, job) {
   if (job.page_key) {
     for (const context of browser.contexts()) {
       for (const page of context.pages()) {
-        if (classifyOpenaiSurface(page.url()) === 'chatgpt' && pageKey(page.url()) === job.page_key) {
+        if (isImageRevisionSurface(page) && pageKey(page.url()) === job.page_key) {
           await page.bringToFront().catch(() => {});
           return page;
         }
@@ -853,7 +883,16 @@ async function findImageRevisionPage(browser, job) {
     const pages = context.pages();
     if (Number.isInteger(job.page_index) && pages[job.page_index]) {
       const page = pages[job.page_index];
-      if (classifyOpenaiSurface(page.url()) === 'chatgpt') {
+      if (isImageRevisionSurface(page)) {
+        await page.bringToFront().catch(() => {});
+        return page;
+      }
+    }
+  }
+
+  for (const context of browser.contexts()) {
+    for (const page of context.pages()) {
+      if (classifyOpenaiSurface(page.url()) === 'chatgpt_images' && await hasVisibleImageEditControl(page)) {
         await page.bringToFront().catch(() => {});
         return page;
       }
@@ -861,6 +900,11 @@ async function findImageRevisionPage(browser, job) {
   }
 
   return null;
+}
+
+function isImageRevisionSurface(page) {
+  const surface = classifyOpenaiSurface(page.url());
+  return surface === 'chatgpt' || surface === 'chatgpt_images';
 }
 
 async function findImageInspectPage(browser, job) {
@@ -897,6 +941,48 @@ async function findImageInspectPage(browser, job) {
     match: job.page_key ? 'page_key_missing' : 'page_unavailable',
     confidence: 'none',
   };
+}
+
+async function prepareImageRevisionPage(page, job) {
+  if (classifyOpenaiSurface(page.url()) !== 'chatgpt_images') {
+    return { ok: true, strategy: 'conversation_composer' };
+  }
+  if (!isCompletedJob(job) && !(await hasCollectedImageOutput(page, job))) {
+    return {
+      ok: false,
+      diagnostic: {
+        category: 'revision_not_ready',
+        message: 'The image job has no collected or completed output to edit on the images surface.',
+        next_step: `Run \`poai image wait --job-id ${job.id}\` and collect the image before revising.`,
+      },
+    };
+  }
+
+  const editControls = await visibleLocatorsFromSelectors(page, IMAGE_EDIT_SELECTORS);
+  if (editControls.length === 0) {
+    return {
+      ok: false,
+      diagnostic: {
+        category: 'image_edit_unavailable',
+        message: 'No visible image edit control was found on the images surface.',
+        next_step: 'Open the generated image in the managed browser or retry from the original conversation page.',
+      },
+    };
+  }
+  if (editControls.length !== 1) {
+    return {
+      ok: false,
+      diagnostic: {
+        category: 'image_edit_ambiguous',
+        message: 'Multiple image edit controls are visible on the images surface, so the exact revision target is ambiguous.',
+        next_step: 'Open the specific generated image so only one edit control is visible, then retry `poai image revise`.',
+      },
+    };
+  }
+
+  await editControls[0].click({ timeout: 5000 });
+  await page.waitForTimeout(1000);
+  return { ok: true, strategy: 'image_edit_control' };
 }
 
 async function checkImageReadiness(page) {
@@ -1075,6 +1161,54 @@ export function classifyImageWaitState({ artifactCount, beforeArtifactCount, gen
   };
 }
 
+export function classifyImageRevisionReadiness({
+  generating,
+  canCollect,
+  completed,
+  surface,
+  imageEditAvailable,
+  imageEditCount,
+} = {}) {
+  if (generating) {
+    return {
+      canRevise: false,
+      strategy: 'wait_for_generation',
+    };
+  }
+
+  const hasOutput = Boolean(canCollect || completed);
+  if (!hasOutput) {
+    return {
+      canRevise: false,
+      strategy: 'output_required',
+    };
+  }
+
+  if (surface === 'chatgpt_images') {
+    if (!imageEditAvailable) {
+      return {
+        canRevise: false,
+        strategy: 'image_edit_unavailable',
+      };
+    }
+    if (Number(imageEditCount ?? 0) !== 1) {
+      return {
+        canRevise: false,
+        strategy: 'image_edit_ambiguous',
+      };
+    }
+    return {
+      canRevise: true,
+      strategy: 'image_edit_control',
+    };
+  }
+
+  return {
+    canRevise: true,
+    strategy: 'conversation_composer',
+  };
+}
+
 export function resolveBeforeArtifactCountAfterAttachment({
   beforeArtifactCount,
   afterAttachmentArtifactCount,
@@ -1233,7 +1367,7 @@ function isCompletedJob(job) {
   return job.status === 'completed' || job.status === 'collected' || Number(job.output_count ?? 0) > 0;
 }
 
-function buildInspectDiagnostics({ located, job, rawGenerating, generating, canCollect, canRevise }) {
+function buildInspectDiagnostics({ located, job, rawGenerating, generating, canCollect, canRevise, revisionStrategy }) {
   const diagnostics = [];
   if (located.confidence?.startsWith('low')) {
     diagnostics.push({
@@ -1265,8 +1399,16 @@ function buildInspectDiagnostics({ located, job, rawGenerating, generating, canC
   if (isCompletedJob(job) && !canRevise) {
     diagnostics.push({
       category: 'revision_not_ready',
-      message: 'The job is marked complete locally, but the live page is not ready for revision.',
-      next_step: 'Inspect the visible browser before revising.',
+      message: revisionStrategy === 'image_edit_unavailable'
+        ? 'The image job is complete, but the images surface does not expose an edit control right now.'
+        : revisionStrategy === 'image_edit_ambiguous'
+          ? 'The image job is complete, but multiple edit controls are visible and the exact target is ambiguous.'
+        : 'The job is marked complete locally, but the live page is not ready for revision.',
+      next_step: revisionStrategy === 'image_edit_unavailable'
+        ? 'Open the generated image in the managed browser or retry from the original conversation page.'
+        : revisionStrategy === 'image_edit_ambiguous'
+          ? 'Open the specific generated image so only one edit control is visible, then retry `poai image revise`.'
+        : 'Inspect the visible browser before revising.',
     });
   }
   return diagnostics;
@@ -1309,6 +1451,51 @@ async function hasCollectedImageOutput(page, job) {
     1,
   );
   return (await countImageArtifacts(page)) >= expectedCount;
+}
+
+async function hasVisibleImageEditControl(page) {
+  return Boolean(await firstVisibleFromSelectors(page, IMAGE_EDIT_SELECTORS));
+}
+
+async function countVisibleImageEditControls(page) {
+  return (await visibleLocatorsFromSelectors(page, IMAGE_EDIT_SELECTORS)).length;
+}
+
+async function firstVisibleFromSelectors(page, selectors) {
+  for (const selector of selectors) {
+    const locator = await firstVisibleLocator(page, selector);
+    if (locator) {
+      return locator;
+    }
+  }
+  return null;
+}
+
+async function visibleLocatorsFromSelectors(page, selectors) {
+  const visible = [];
+  const seen = new Set();
+  for (const selector of selectors) {
+    const locator = page.locator(selector);
+    const count = await locator.count().catch(() => 0);
+    for (let i = 0; i < count; i += 1) {
+      const candidate = locator.nth(i);
+      if (!(await candidate.isVisible().catch(() => false))) {
+        continue;
+      }
+      const key = await candidate.evaluate((element) => {
+        if (!element.dataset.poaiVisibleKey) {
+          element.dataset.poaiVisibleKey = globalThis.crypto?.randomUUID?.() ?? String(Math.random());
+        }
+        return element.dataset.poaiVisibleKey;
+      }).catch(() => `${selector}:${i}`);
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+      visible.push(candidate);
+    }
+  }
+  return visible;
 }
 
 async function firstVisibleLocator(page, selector) {

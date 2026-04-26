@@ -9,6 +9,7 @@ import {
   runChatJobsList,
   runChatSend,
   runChatSubmit,
+  runChatToolsInspect,
   runChatWait,
 } from './chat.js';
 import {
@@ -29,10 +30,11 @@ const HELP = `playwright-openai
 Usage:
   poai status [--json] [--text] [--endpoint <url>] [--ports <list>] [--timeout-ms <ms>]
   poai discover [--json] [--text] [--endpoint <url>] [--ports <list>] [--timeout-ms <ms>]
-  poai chat send --prompt <text> [--model <auto|pro|thinking|instant|label>] [--json] [--text] [--endpoint <url>] [--timeout-ms <ms>]
-  poai chat submit --prompt <text> [--file <path>] [--model <auto|pro|thinking|instant|label>] [--json] [--text] [--endpoint <url>]
+  poai chat send --prompt <text> [--file <path>] [--model <auto|pro|thinking|instant|label>] [--web-search] [--deep-research] [--temporary] [--create-image] [--json] [--text] [--endpoint <url>] [--timeout-ms <ms>]
+  poai chat submit --prompt <text> [--file <path>] [--model <auto|pro|thinking|instant|label>] [--web-search] [--deep-research] [--temporary] [--create-image] [--json] [--text] [--endpoint <url>]
   poai chat wait --job-id <id> [--json] [--text] [--timeout-ms <ms>]
   poai chat collect --job-id <id> [--json] [--text]
+  poai chat tools inspect [--json] [--text] [--endpoint <url>] [--timeout-ms <ms>]
   poai chat jobs list [--json] [--text] [--status <status>] [--limit <n>]
   poai chat jobs cleanup [--json] [--text] [--status <status>] [--limit <n>] [--yes]
   poai image send --prompt <text> [--file <path>] [--model <auto|instant|thinking|light|low|medium|high|extended|heavy|xhigh|standard|advanced|label>] [--output-dir <path>] [--max-artifacts <n>] [--json] [--text] [--endpoint <url>] [--timeout-ms <ms>]
@@ -54,9 +56,10 @@ Commands:
   status                  Inspect local browser/CDP readiness without reading session secrets.
   discover                Read safe page-state and capability signals from OpenAI pages.
   chat send               Submit a prompt and collect the latest assistant response in one command.
-  chat submit             Select a model, submit a prompt, optionally attach one file, and create a resumable job.
+  chat submit             Select a model/tool mode, submit a prompt, optionally attach one file, and create a resumable job.
   chat wait               Wait for a submitted job to finish.
   chat collect            Collect the latest assistant response for a job.
+  chat tools inspect      Read safe ChatGPT tool-mode availability without submitting a prompt.
   chat jobs list          List non-secret local chat job metadata.
   chat jobs cleanup       Preview or delete selected local chat job metadata.
   image send              Route by image prompt difficulty by default, optionally attach one image, submit, wait, and collect generated image artifacts.
@@ -76,7 +79,7 @@ function parseArgs(argv) {
   const args = [...argv];
   const command = args[0] && !args[0].startsWith('-') ? args.shift() : 'status';
   const subcommand = (command === 'browser' || command === 'chat' || command === 'image' || command === 'action-pack') && args[0] && !args[0].startsWith('-') ? args.shift() : undefined;
-  const action = (command === 'chat' || command === 'image') && subcommand === 'jobs' && args[0] && !args[0].startsWith('-') ? args.shift() : undefined;
+  const action = (command === 'chat' || command === 'image') && (subcommand === 'jobs' || subcommand === 'tools') && args[0] && !args[0].startsWith('-') ? args.shift() : undefined;
   const options = {
     format: 'json',
     endpoint: undefined,
@@ -110,6 +113,10 @@ function parseArgs(argv) {
     yes: false,
     headless: false,
     timeoutMs: undefined,
+    webSearch: false,
+    deepResearch: false,
+    temporary: false,
+    createImage: false,
   };
 
   for (let i = 0; i < args.length; i += 1) {
@@ -235,6 +242,14 @@ function parseArgs(argv) {
       options.yes = true;
     } else if (arg === '--headless') {
       options.headless = true;
+    } else if (arg === '--web-search') {
+      options.webSearch = true;
+    } else if (arg === '--deep-research') {
+      options.deepResearch = true;
+    } else if (arg === '--temporary') {
+      options.temporary = true;
+    } else if (arg === '--create-image') {
+      options.createImage = true;
     } else if (arg === '--timeout-ms') {
       const value = Number(readValue(args, i, arg));
       if (!Number.isFinite(value) || value <= 0) {
@@ -293,6 +308,12 @@ async function dispatch(command, subcommand, action, options) {
   }
   if (command === 'chat' && subcommand === 'collect') {
     return runChatCollect(options);
+  }
+  if (command === 'chat' && subcommand === 'tools' && action === 'inspect') {
+    return runChatToolsInspect(options);
+  }
+  if (command === 'chat' && subcommand === 'tools') {
+    throw new Error(`Unknown chat tools action: ${action ?? '(missing)'}`);
   }
   if (command === 'chat' && subcommand === 'jobs' && action === 'list') {
     return runChatJobsList(options);

@@ -98,6 +98,7 @@ function formatError(error) {
 
 async function discoverPage(page, surface) {
   const signals = await collectSignals(page);
+  signals.push(...await collectTransientMenuSignals(page));
   const sessionState = classifyDiscoverySessionState(surface, signals);
   return {
     url: sanitizeUrl(page.url()),
@@ -119,6 +120,21 @@ async function collectSignals(page) {
     ['new_chat_control', 'a[href="/"], button:has-text("New chat"), a:has-text("New chat"), button:has-text("新聊天"), a:has-text("新聊天")'],
     ['chatgpt_images_url', 'a[href^="/images"], a[href*="chatgpt.com/images"]'],
     ['auth_form_input', 'input[type="email"], input[name="email"], input[type="password"]'],
+    ['model_selector', 'button[data-testid="model-switcher-dropdown-button"], button[aria-label="模型选择器"], button[aria-label*="model selector" i]'],
+    ['composer_plus_control', 'button[data-testid="composer-plus-btn"], button[aria-label="添加文件等"], button[aria-label*="Attach" i], button[aria-label*="Add" i]'],
+    ['send_button', 'button[data-testid="send-button"], button[aria-label="Send prompt"], button[aria-label="发送提示"]'],
+    ['temporary_chat_control', 'button[aria-label="开启临时聊天"], button[aria-label*="temporary chat" i]'],
+    ['group_chat_control', 'button[aria-label="开始群聊"], button[aria-label*="group chat" i]'],
+    ['dictation_control', 'button[aria-label="开始听写"], button[aria-label*="dictation" i]'],
+    ['voice_control', 'button[aria-label="启动语音功能"], button[aria-label*="voice" i]'],
+    ['search_chats_control', 'button:has-text("搜索聊天"), button[aria-label*="Search chats" i]'],
+    ['sidebar_control', 'button[aria-label="打开边栏"], button[aria-label="关闭边栏"], button[aria-label*="sidebar" i]'],
+    ['gpts_explore_link', 'a[data-testid="explore-gpts-button"], a[href="/gpts"]'],
+    ['codex_link', 'a[href*="/codex"]'],
+    ['custom_gpt_link', 'a[href^="/g/"]'],
+    ['image_edit_control', 'button[aria-label="编辑图片"], button:has-text("编辑")'],
+    ['image_share_control', 'button[aria-label*="分享此图片"], button[aria-label*="Share this image" i]'],
+    ['image_gallery_candidate', 'button[aria-label^="打开图片"], button[aria-label*="Open image" i]'],
   ];
 
   const signals = [];
@@ -129,6 +145,94 @@ async function collectSignals(page) {
     });
   }
   return signals;
+}
+
+async function collectTransientMenuSignals(page) {
+  const signals = [];
+  signals.push(...await collectMenuTextSignals(page, {
+    openSelector: 'button[data-testid="model-switcher-dropdown-button"], button[aria-label="模型选择器"], button[aria-label*="model selector" i]',
+    definitions: [
+      ['chat_model_instant', /Instant|日常|快速/i],
+      ['chat_model_thinking', /Thinking|思考|复杂/i],
+      ['chat_model_pro', /\bPro\b|研究级|专业/i],
+      ['model_configure_control', /配置|Configure/i],
+    ],
+  }));
+  signals.push(...await collectMenuTextSignals(page, {
+    openSelector: 'button[data-testid="composer-plus-btn"], button[aria-label="添加文件等"], button[aria-label*="Attach" i], button[aria-label*="Add" i]',
+    definitions: [
+      ['attachment_menu_upload', /添加照片和文件|Upload|Attach|照片|文件/i],
+      ['recent_files_control', /近期文件|Recent files/i],
+      ['image_creation_control', /创建图片|Create image|Image/i],
+      ['deep_research_control', /深度研究|Deep research/i],
+      ['web_search_control', /网页搜索|Web search/i],
+      ['project_attach_control', /项目|Project/i],
+    ],
+  }));
+  await page.keyboard.press('Escape').catch(() => {});
+  return dedupeSignals(signals);
+}
+
+async function collectMenuTextSignals(page, options) {
+  const opener = await firstVisibleLocator(page, options.openSelector);
+  if (!opener) {
+    return [];
+  }
+
+  const text = await readTransientMenuText(page, opener);
+  return options.definitions.map(([name, pattern]) => ({
+    name,
+    present: pattern.test(text),
+  }));
+}
+
+async function readTransientMenuText(page, opener) {
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.waitForTimeout(100).catch(() => {});
+  await opener.click({ timeout: 2500 }).catch(async () => {
+    await opener.evaluate((element) => element.click()).catch(() => {});
+  });
+  await page.waitForTimeout(300).catch(() => {});
+  const text = await page.evaluate(() => {
+    const isVisible = (element) => {
+      const rect = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return rect.width > 0 && rect.height > 0 && style.display !== 'none' && style.visibility !== 'hidden';
+    };
+    return [
+      ...document.querySelectorAll('[role="menu"], [role="listbox"], [data-radix-menu-content], [data-radix-popper-content-wrapper]'),
+    ]
+      .filter(isVisible)
+      .map((element) => element.innerText || element.textContent || '')
+      .join('\n')
+      .replace(/\s+/g, ' ')
+      .trim();
+  }).catch(() => '');
+  await page.keyboard.press('Escape').catch(() => {});
+  return text;
+}
+
+async function firstVisibleLocator(page, selector) {
+  const locator = page.locator(selector);
+  const count = await locator.count().catch(() => 0);
+  for (let i = 0; i < count; i += 1) {
+    const candidate = locator.nth(i);
+    if (await candidate.isVisible().catch(() => false)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function dedupeSignals(signals) {
+  const byName = new Map();
+  for (const signal of signals) {
+    byName.set(signal.name, {
+      name: signal.name,
+      present: Boolean(signal.present || byName.get(signal.name)?.present),
+    });
+  }
+  return [...byName.values()];
 }
 
 async function isPresent(page, selector) {
@@ -183,6 +287,55 @@ export function buildDiscoveryCapabilities(surface, sessionState, signals) {
       name: 'images_surface_candidate',
       status: 'available',
       evidence: surface === 'chatgpt_images' ? 'current_url' : 'images_link',
+    });
+  }
+  if (sessionState === 'app_ready' && hasSignal(signals, 'model_selector')) {
+    capabilities.push({
+      name: 'model_selection_candidate',
+      status: 'available',
+      evidence: 'model_selector',
+    });
+  }
+  if (sessionState === 'app_ready' && hasSignal(signals, 'web_search_control')) {
+    capabilities.push({
+      name: 'web_search_candidate',
+      status: 'available',
+      evidence: 'web_search_control',
+    });
+  }
+  if (sessionState === 'app_ready' && hasSignal(signals, 'deep_research_control')) {
+    capabilities.push({
+      name: 'deep_research_candidate',
+      status: 'available',
+      evidence: 'deep_research_control',
+    });
+  }
+  if (sessionState === 'app_ready' && hasSignal(signals, 'image_creation_control')) {
+    capabilities.push({
+      name: 'image_creation_candidate',
+      status: 'available',
+      evidence: 'image_creation_control',
+    });
+  }
+  if (sessionState === 'app_ready' && hasSignal(signals, 'temporary_chat_control')) {
+    capabilities.push({
+      name: 'temporary_chat_candidate',
+      status: 'available',
+      evidence: 'temporary_chat_control',
+    });
+  }
+  if (surface === 'chatgpt_images' && hasSignal(signals, 'image_edit_control')) {
+    capabilities.push({
+      name: 'image_edit_candidate',
+      status: 'available',
+      evidence: 'image_edit_control',
+    });
+  }
+  if (surface === 'chatgpt_images' && hasSignal(signals, 'image_share_control')) {
+    capabilities.push({
+      name: 'image_share_candidate',
+      status: 'available',
+      evidence: 'image_share_control',
     });
   }
   return capabilities;
