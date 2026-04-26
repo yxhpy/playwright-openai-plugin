@@ -1,7 +1,7 @@
 {
   "name": "playwright-openai-plugin",
-  "version": "0.3.2",
-  "description": "Installable Codex plugin and local CLI for operating an already logged-in OpenAI/ChatGPT browser session through Playwright.",
+  "version": "0.3.3",
+  "description": "Installable Codex plugin and local Playwright CLIs for logged-in OpenAI/ChatGPT browser workflows and CSDN publishing.",
   "author": {
     "name": "Local Operator",
     "email": "local@example.invalid",
@@ -15,13 +15,16 @@
     "chatgpt",
     "playwright",
     "codex-plugin",
-    "browser-automation"
+    "browser-automation",
+    "csdn",
+    "publishing",
+    "markdown"
   ],
   "skills": "./skills/",
   "interface": {
     "displayName": "Playwright OpenAI",
-    "shortDescription": "Control a logged-in ChatGPT browser session from Codex.",
-    "longDescription": "Installable Codex plugin for the playwright-openai CLI. It helps Codex inspect, submit, wait, collect, revise, and diagnose ChatGPT web workflows through an already logged-in managed browser session without storing browser credentials. It also includes difficulty-aware ChatGPT image routing plus a GPT Image prompt-router skill backed by an attributed offline prompt catalogue.",
+    "shortDescription": "Control logged-in ChatGPT and CSDN browser workflows from Codex.",
+    "longDescription": "Installable Codex plugin for local Playwright browser automation. It helps Codex inspect, submit, wait, collect, revise, and diagnose ChatGPT web workflows through an already logged-in managed browser session without storing browser credentials. It also includes difficulty-aware ChatGPT image routing, a GPT Image prompt-router skill backed by an attributed offline prompt catalogue, and CSDN Markdown publishing automation for dry-run validation, editor inspection, draft preparation, local image uploads, cover upload, and publish-settings fill.",
     "developerName": "Local Operator",
     "category": "Productivity",
     "capabilities": [
@@ -36,7 +39,8 @@
       "Inspect my current ChatGPT browser session.",
       "Generate an image and collect the result.",
       "Find a GPT Image 2 prompt pattern for an image idea.",
-      "Check whether an image job can wait, collect, or revise."
+      "Check whether an image job can wait, collect, or revise.",
+      "Prepare a CSDN article draft with images, cover, tags, category, and visibility."
     ],
     "brandColor": "#10A37F"
   }

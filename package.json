@@ -1,17 +1,22 @@
 {
   "name": "playwright-openai-plugin",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "private": true,
   "description": "Installable Codex plugin and local Playwright CLI for an already logged-in OpenAI browser session.",
   "type": "module",
   "bin": {
     "playwright-openai": "./src/cli.js",
-    "poai": "./src/cli.js"
+    "poai": "./src/cli.js",
+    "csdn-publish": "./scripts/csdn-publish.mjs"
   },
   "scripts": {
     "status": "node src/cli.js status",
+    "csdn:launch": "node src/cli.js browser launch --url https://editor.csdn.net/md/",
+    "csdn:inspect": "node scripts/csdn-publish.mjs --inspect",
+    "csdn:dry-run": "node scripts/csdn-publish.mjs --dry-run",
+    "csdn:draft": "node scripts/csdn-publish.mjs --draft",
     "test": "node --test",
-    "check": "node --check src/cli.js && node --check src/status.js && node --check src/cdp.js && node --check src/output.js && node --check src/browser.js && node --check src/paths.js && node --check src/discover.js && node --check src/model.js && node --check src/chat.js && node --check src/images.js && node --check src/action-pack.js && node --check src/jobs.js && npm test"
+    "check": "node --check src/cli.js && node --check src/status.js && node --check src/cdp.js && node --check src/output.js && node --check src/browser.js && node --check src/paths.js && node --check src/discover.js && node --check src/model.js && node --check src/chat.js && node --check src/images.js && node --check src/action-pack.js && node --check src/jobs.js && node --check src/csdn.js && node --check scripts/csdn-publish.mjs && npm test"
   },
   "dependencies": {
     "fflate": "^0.8.2",

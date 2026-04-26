@@ -1,6 +1,9 @@
 # Playwright OpenAI Plugin
 
-Installable Codex plugin plus local `poai` CLI for operating an already logged-in ChatGPT/OpenAI browser session through Playwright.
+Installable Codex plugin plus local Playwright CLIs for operating already logged-in browser sessions:
+
+- `poai` controls ChatGPT/OpenAI browser workflows.
+- `csdn-publish` prepares CSDN Markdown drafts, uploads local body images, sets the cover, and fills publish settings.
 
 This repository is designed to be cloned directly into a Codex plugin directory.
 
@@ -100,6 +103,7 @@ Or install from an existing local checkout:
 
 ```bash
 scripts/poai --help
+scripts/csdn-publish.mjs --help
 npm run check
 ```
 
@@ -113,6 +117,13 @@ scripts/poai discover --json
 ```
 
 Log in to ChatGPT in the launched browser if discovery reports a login-required state.
+
+For CSDN publishing, launch the editor and log in once:
+
+```bash
+npm run csdn:launch
+npm run csdn:inspect -- --endpoint http://127.0.0.1:9333
+```
 
 ## Common Commands
 
@@ -131,6 +142,37 @@ scripts/poai image revise --job-id <job-id> --prompt "Make it simpler" --json
 For image work, `--model auto` routes by generation difficulty. Simple requests use Instant; complex requests involving reference images, typography, layout, product detail, character consistency, sprites/action grids, or multi-panel structure use Thinking. For explicit quality-over-speed requests, use `--model thinking`, `--model extended`, or `--model heavy`.
 
 Pro is not the normal image-generation route because ChatGPT Pro currently does not expose image generation. A `--model pro` image request is treated as Pro-quality intent and routed to Thinking/Heavy rather than selecting Pro.
+
+## CSDN Publish Workflow
+
+Validate inputs without touching the browser:
+
+```bash
+scripts/csdn-publish.mjs --dry-run \
+  --title "文章标题" \
+  --markdown-file ./article.md \
+  --cover ./cover.png \
+  --image hero=./hero.png
+```
+
+Prepare a draft and stop before final publication:
+
+```bash
+scripts/csdn-publish.mjs --draft \
+  --endpoint http://127.0.0.1:9333 \
+  --title "文章标题" \
+  --markdown-file ./article.md \
+  --strip-title-heading \
+  --cover ./cover.png \
+  --image hero=./hero.png \
+  --summary "文章摘要，最多 256 字" \
+  --tags Playwright,CSDN,自动化 \
+  --category AI编程 \
+  --article-type original \
+  --visibility public
+```
+
+Use `{{csdn:image:key}}` in Markdown for local body images and pass `--image key=./image.png`. The script imports final Markdown through CSDN's Markdown import flow so headings, lists, code blocks, and uploaded image URLs survive editor conversion. Real publication requires `--publish --confirm-publish "<exact title>"`.
 
 ## GPT Image Prompt Router Skill
 
@@ -197,6 +239,7 @@ scripts/poai action-pack create \
 - Action-pack manifests avoid prompt text, character descriptions, source URLs, and browser session material.
 - Action-pack QA reports store structural frame metrics only.
 - Selective regeneration retries only QA-failed generated actions and is bounded by `--regen-attempts`.
+- CSDN automation defaults to dry-run or draft-safe operation; real publication requires `--publish --confirm-publish "<exact title>"`.
 
 ## Included Codex Skill
 
@@ -204,3 +247,4 @@ The plugin includes:
 
 - `skills/playwright-openai/SKILL.md`, which teaches Codex how to use the CLI safely.
 - `skills/gpt-image-prompt-router/SKILL.md`, which helps Codex find and adapt GPT Image 2 prompt examples before generation.
+- `skills/csdn-publish/SKILL.md`, which teaches Codex how to prepare CSDN drafts with body images, cover, summary, tags, category, article type, and visibility.
