@@ -14,3 +14,4 @@ npm install
 
 echo "Installed symlink: $TARGET_DIR -> $REPO_ROOT"
 echo "Verify with: $TARGET_DIR/scripts/poai --help"
+echo "Verify CSDN publisher with: $TARGET_DIR/scripts/csdn-publish.mjs --help"

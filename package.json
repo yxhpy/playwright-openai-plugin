@@ -1,8 +1,8 @@
 {
   "name": "playwright-openai-plugin",
-  "version": "0.3.4",
+  "version": "0.3.5",
   "private": true,
-  "description": "Installable Codex plugin and local Playwright CLI for an already logged-in OpenAI browser session.",
+  "description": "Installable Codex plugin and local Playwright CLIs for logged-in OpenAI and CSDN browser workflows.",
   "type": "module",
   "bin": {
     "playwright-openai": "./src/cli.js",
